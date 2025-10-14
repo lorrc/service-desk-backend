@@ -4,9 +4,9 @@ import (
 	"context"
 	// ... imports
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/your-org/service-desk-backend/internal/adapters/secondary/postgres/db"
-	"github.com/your-org/service-desk-backend/internal/core/domain"
-	"github.com/your-org/service-desk-backend/internal/core/ports"
+	"github.com/lorrc/service-desk-backend/internal/adapters/secondary/postgres/db"
+	"github.com/lorrc/service-desk-backend/internal/core/domain"
+	"github.com/lorrc/service-desk-backend/internal/core/ports"
 )
 
 type UserRepository struct {

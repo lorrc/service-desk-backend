@@ -3,7 +3,7 @@ package ports
 import (
 	"context"
 
-	"github.com/your-org/service-desk-backend/internal/core/domain"
+	"github.com/lorrc/service-desk-backend/internal/core/domain"
 )
 
 type UserRepository interface {

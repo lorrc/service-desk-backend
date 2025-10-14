@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
-	"github.com/your-org/service-desk-backend/internal/core/domain"
+	"github.com/lorrc/service-desk-backend/internal/core/domain"
 )
 
 type AuthService interface {

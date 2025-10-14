@@ -6,8 +6,8 @@ import (
 
 	"github.com/google/uuid"
 	// ... imports
-	"github.com/your-org/service-desk-backend/internal/core/domain"
-	"github.com/your-org/service-desk-backend/internal/core/ports"
+	"github.com/lorrc/service-desk-backend/internal/core/domain"
+	"github.com/lorrc/service-desk-backend/internal/core/ports"
 )
 
 type AuthService struct {
