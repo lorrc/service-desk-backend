@@ -1,0 +1,28 @@
+version: '3.8'
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      # Use the service name 'db' as the hostname to connect to the database container
+      DATABASE_URL: postgres://servicedesk_user:local_password@db:5432/servicedesk_db?sslmode=disable
+      JWT_SECRET: "a_very_secure_secret_for_local_development"
+      SERVER_PORT: ":8080"
+    depends_on:
+      - db
+    restart: on-failure
+  db:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: servicedesk_user
+      POSTGRES_PASSWORD: local_password
+      POSTGRES_DB: servicedesk_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+volumes:
+  db_data:
