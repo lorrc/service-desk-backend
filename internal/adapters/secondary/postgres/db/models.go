@@ -8,10 +8,33 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type Comment struct {
+	ID        pgtype.UUID        `json:"id"`
+	TicketID  int64              `json:"ticket_id"`
+	AuthorID  pgtype.UUID        `json:"author_id"`
+	Body      string             `json:"body"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type Organization struct {
 	ID        pgtype.UUID        `json:"id"`
 	Name      string             `json:"name"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type Permission struct {
+	ID   int32  `json:"id"`
+	Code string `json:"code"`
+}
+
+type Role struct {
+	ID   int32  `json:"id"`
+	Name string `json:"name"`
+}
+
+type RolePermission struct {
+	RoleID       int32 `json:"role_id"`
+	PermissionID int32 `json:"permission_id"`
 }
 
 type Ticket struct {
@@ -33,4 +56,9 @@ type User struct {
 	Email          string             `json:"email"`
 	PasswordHash   string             `json:"password_hash"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type UserRole struct {
+	UserID pgtype.UUID `json:"user_id"`
+	RoleID int32       `json:"role_id"`
 }
