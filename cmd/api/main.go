@@ -40,15 +40,15 @@ func main() {
 	// 4. Dependency Injection (Wiring the Hexagon)
 	// Repositories (Secondary Adapters)
 	userRepo := postgres.NewUserRepository(pool)
-	// ticketRepo := ...
+	ticketRepo := postgres.NewTicketRepository(pool)
 
 	// Services (Core)
 	authService := services.NewAuthService(userRepo)
-	// ticketService := ...
+	ticketService := services.NewTicketService(ticketRepo)
 
 	// Handlers (Primary Adapters)
 	authHandler := httpAdapter.NewAuthHandler(authService, tokenManager)
-	// ticketHandler := ...
+	ticketHandler := httpAdapter.NewTicketHandler(ticketService)
 
 	// 5. Setup Router
 	r := chi.NewRouter()
@@ -56,14 +56,13 @@ func main() {
 	r.Use(middleware.Recoverer)
 
 	r.Route("/api/v1", func(r chi.Router) {
-		// Public routes
-		r.Post("/auth/register", authHandler.HandleRegister)
-		r.Post("/auth/login", authHandler.HandleLogin)
+		// Public routes for authentication
+		r.Route("/auth", authHandler.RegisterRoutes)
 
-		// Protected routes
+		// Protected routes for tickets
 		r.Group(func(r chi.Router) {
 			r.Use(httpMiddleware.JWTMiddleware(tokenManager))
-			// r.Post("/tickets", ticketHandler.HandleCreateTicket)
+			r.Route("/tickets", ticketHandler.RegisterRoutes)
 		})
 	})
 
