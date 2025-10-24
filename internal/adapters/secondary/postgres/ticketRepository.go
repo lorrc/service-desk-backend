@@ -32,22 +32,27 @@ func NewTicketRepository(pool *pgxpool.Pool) ports.TicketRepository {
 // mapDBTicketToDomain converts a database ticket model to a core domain model.
 func mapDBTicketToDomain(dbTicket db.Ticket) *domain.Ticket {
 	domainTicket := &domain.Ticket{
-		ID:          dbTicket.ID,
-		Title:       dbTicket.Title,
-		Description: dbTicket.Description.String,
-		Status:      domain.TicketStatus(dbTicket.Status),
-		Priority:    domain.TicketPriority(dbTicket.Priority),
-		CreatedAt:   dbTicket.CreatedAt.Time,
+		ID:        dbTicket.ID,
+		Title:     dbTicket.Title,
+		Status:    domain.TicketStatus(dbTicket.Status),
+		Priority:  domain.TicketPriority(dbTicket.Priority),
+		CreatedAt: dbTicket.CreatedAt.Time,
 	}
 
+	if dbTicket.Description != nil {
+		domainTicket.Description = *dbTicket.Description
+	}
 	// Safely convert pgtype.UUID to uuid.UUID for RequesterID
 	if dbTicket.RequesterID.Valid {
-		domainTicket.RequesterID = dbTicket.RequesterID.Bytes
+		// Explicit type cast from [16]byte to uuid.UUID
+		domainTicket.RequesterID = uuid.UUID(dbTicket.RequesterID.Bytes)
 	}
 
-	// Handle nullable AssigneeID
+	// Handle nullable AssigneeID with the correct type cast
 	if dbTicket.AssigneeID.Valid {
-		assigneeUUID := dbTicket.AssigneeID.Bytes
+		// 1. Cast the [16]byte to uuid.UUID
+		assigneeUUID := uuid.UUID(dbTicket.AssigneeID.Bytes)
+		// 2. Assign the pointer of the correctly typed variable
 		domainTicket.AssigneeID = &assigneeUUID
 	}
 
@@ -61,18 +66,22 @@ func mapDBTicketToDomain(dbTicket db.Ticket) *domain.Ticket {
 
 // Create persists a new ticket entity.
 func (r *TicketRepository) Create(ctx context.Context, ticket *domain.Ticket) (*domain.Ticket, error) {
+
+	var description *string
+	if ticket.Description != "" {
+		description = &ticket.Description
+	}
+
 	params := db.CreateTicketParams{
 		Title:       ticket.Title,
-		Description: pgtype.Text{String: ticket.Description, Valid: ticket.Description != ""},
+		Description: description, // <-- This is the fix
 		Priority:    string(ticket.Priority),
 		RequesterID: pgtype.UUID{Bytes: ticket.RequesterID, Valid: true},
 	}
-
 	createdTicket, err := r.q.CreateTicket(ctx, params)
 	if err != nil {
 		return nil, err
 	}
-
 	return mapDBTicketToDomain(createdTicket), nil
 }
 
@@ -90,23 +99,19 @@ func (r *TicketRepository) GetByID(ctx context.Context, id int64) (*domain.Ticke
 
 // Update persists changes to an existing ticket entity.
 func (r *TicketRepository) Update(ctx context.Context, ticket *domain.Ticket) (*domain.Ticket, error) {
-	// Prepare params for the update query
 	params := db.UpdateTicketParams{
 		ID:     ticket.ID,
 		Status: string(ticket.Status),
-		// Safely handle nullable assignee ID
 		AssigneeID: pgtype.UUID{
-			Bytes: [16]byte{}, // Default zero value
+			Bytes: [16]byte{},
 			Valid: ticket.AssigneeID != nil,
 		},
-		// Safely handle nullable updated at timestamp
 		UpdatedAt: pgtype.Timestamptz{
-			Time:  time.Time{}, // Default zero value
+			Time:  time.Time{},
 			Valid: ticket.UpdatedAt != nil,
 		},
 	}
 
-	// Only set the Bytes and Time values if the pointers are not nil
 	if ticket.AssigneeID != nil {
 		params.AssigneeID.Bytes = *ticket.AssigneeID
 	}
@@ -121,12 +126,32 @@ func (r *TicketRepository) Update(ctx context.Context, ticket *domain.Ticket) (*
 	return mapDBTicketToDomain(updatedTicket), nil
 }
 
-// List is not implemented in this phase.
-func (r *TicketRepository) List(ctx context.Context) ([]*domain.Ticket, error) {
-	return nil, errors.New("not implemented")
+// ListByRequester retrieves tickets created by a specific user.
+func (r *TicketRepository) ListByRequester(ctx context.Context, requesterID uuid.UUID) ([]*domain.Ticket, error) {
+	dbTickets, err := r.q.ListTicketsByRequesterID(ctx, pgtype.UUID{Bytes: requesterID, Valid: true})
+	if err != nil {
+		return nil, err
+	}
+
+	domainTickets := make([]*domain.Ticket, len(dbTickets))
+	for i, dbTicket := range dbTickets {
+		domainTickets[i] = mapDBTicketToDomain(dbTicket)
+	}
+
+	return domainTickets, nil
 }
 
-// ListByRequester is not implemented in this phase.
-func (r *TicketRepository) ListByRequester(ctx context.Context, requesterID uuid.UUID) ([]*domain.Ticket, error) {
-	return nil, errors.New("not implemented")
+// List retrieves all tickets.
+func (r *TicketRepository) List(ctx context.Context) ([]*domain.Ticket, error) {
+	dbTickets, err := r.q.ListTickets(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	domainTickets := make([]*domain.Ticket, len(dbTickets))
+	for i, dbTicket := range dbTickets {
+		domainTickets[i] = mapDBTicketToDomain(dbTicket)
+	}
+
+	return domainTickets, nil
 }

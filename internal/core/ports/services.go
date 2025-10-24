@@ -20,6 +20,11 @@ type AuthService interface {
 	Login(ctx context.Context, email, password string) (*domain.User, error)
 }
 
+// AuthorizationService defines the port for checking user permissions.
+type AuthorizationService interface {
+	Can(ctx context.Context, userID uuid.UUID, permission string) (bool, error)
+}
+
 // CreateTicketParams defines the required input for creating a new ticket.
 type CreateTicketParams struct {
 	Title       string
@@ -45,6 +50,17 @@ type AssignTicketParams struct {
 	ActorID uuid.UUID
 }
 
+type CreateCommentParams struct {
+	TicketID int64
+	ActorID  uuid.UUID
+	Body     string
+}
+
+type GetCommentsParams struct {
+	TicketID int64
+	ActorID  uuid.UUID
+}
+
 // TicketService defines the core business operations for managing the ticket lifecycle.
 // This is a Primary Port (Driver Port).
 type TicketService interface {
@@ -66,4 +82,10 @@ type TicketService interface {
 	// The viewerID is included so the service can scope the results based on the user's role
 	// (e.g., customers see only their own tickets, agents see their assigned tickets).
 	ListTickets(ctx context.Context, viewerID uuid.UUID) ([]*domain.Ticket, error)
+}
+
+// CommentService defines the port for comment-related business logic.
+type CommentService interface {
+	CreateComment(ctx context.Context, params CreateCommentParams) (*domain.Comment, error)
+	GetCommentsForTicket(ctx context.Context, params GetCommentsParams) ([]*domain.Comment, error)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -54,6 +55,17 @@ func (r *UserRepository) Create(ctx context.Context, user *domain.User) (*domain
 
 func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*domain.User, error) {
 	dbUser, err := r.q.GetUserByEmail(ctx, email)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ports.ErrUserNotFound
+		}
+		return nil, err
+	}
+	return mapDBUserToDomain(dbUser), nil
+}
+
+func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error) {
+	dbUser, err := r.q.GetUserByID(ctx, pgtype.UUID{Bytes: id, Valid: true})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ports.ErrUserNotFound

@@ -7,15 +7,19 @@ import (
 	"github.com/google/uuid"
 )
 
-// TicketStatus represents the lifecycle state of a ticket.
-// Using a distinct type allows us to define methods on it and ensures type safety.
+// Pre-defined errors for domain-specific validation.
+var (
+	ErrTitleRequired           = errors.New("title is required")
+	ErrInvalidStatusTransition = errors.New("invalid status transition")
+)
+
+// TicketStatus represents the possible states of a ticket.
 type TicketStatus string
 
 const (
 	StatusOpen       TicketStatus = "OPEN"
 	StatusInProgress TicketStatus = "IN_PROGRESS"
 	StatusClosed     TicketStatus = "CLOSED"
-	StatusBacklog    TicketStatus = "BACKLOG"
 )
 
 // TicketPriority represents the urgency of a ticket.
@@ -25,106 +29,72 @@ const (
 	PriorityLow    TicketPriority = "LOW"
 	PriorityMedium TicketPriority = "MEDIUM"
 	PriorityHigh   TicketPriority = "HIGH"
-	PriorityUrgent TicketPriority = "URGENT"
 )
 
-// Ticket is the core domain entity representing a service desk request.
+// Ticket is the core domain entity.
 type Ticket struct {
 	ID          int64
 	Title       string
 	Description string
 	Status      TicketStatus
 	Priority    TicketPriority
-
-	// Foreign Keys referencing the User entity
 	RequesterID uuid.UUID
-	// AssigneeID is a pointer to allow for a nil (unassigned) state.
-	AssigneeID *uuid.UUID
-
-	// Timestamps
-	CreatedAt time.Time
-	// UpdatedAt is a pointer to allow for a nil state (never updated).
-	UpdatedAt *time.Time
+	AssigneeID  *uuid.UUID
+	CreatedAt   time.Time
+	UpdatedAt   *time.Time
 }
 
-// NewTicket is a factory function (Constructor) to ensure a Ticket is always
-// created in a valid initial state.
+// NewTicket is a factory function to create a valid new ticket.
 func NewTicket(title, description string, priority TicketPriority, requesterID uuid.UUID) (*Ticket, error) {
 	if title == "" {
-		return nil, errors.New("ticket title cannot be empty")
-	}
-	if requesterID == uuid.Nil {
-		return nil, errors.New("requester ID is required")
-	}
-
-	// Validate priority (optional, can also be handled at the service layer)
-	if !priority.IsValid() {
-		return nil, errors.New("invalid ticket priority specified")
+		return nil, ErrTitleRequired
 	}
 
 	return &Ticket{
 		Title:       title,
 		Description: description,
-		Status:      StatusOpen, // All new tickets start as OPEN
+		Status:      StatusOpen, // Default status
 		Priority:    priority,
 		RequesterID: requesterID,
 		CreatedAt:   time.Now().UTC(),
 	}, nil
 }
 
-// IsValid checks if the priority string is one of the allowed values.
-func (p TicketPriority) IsValid() bool {
-	switch p {
-	case PriorityLow, PriorityMedium, PriorityHigh, PriorityUrgent:
-		return true
+// UpdateStatus changes the ticket's status, enforcing business rules.
+func (t *Ticket) UpdateStatus(newStatus TicketStatus) error {
+	// Defines the valid state transitions.
+	validTransitions := map[TicketStatus][]TicketStatus{
+		StatusOpen:       {StatusInProgress, StatusClosed},
+		StatusInProgress: {StatusOpen, StatusClosed},
+		StatusClosed:     {}, // Cannot transition from closed
 	}
-	return false
+
+	allowed, ok := validTransitions[t.Status]
+	if !ok {
+		return ErrInvalidStatusTransition // Should not happen with valid states
+	}
+
+	for _, s := range allowed {
+		if s == newStatus {
+			t.Status = newStatus
+			now := time.Now().UTC()
+			t.UpdatedAt = &now
+			return nil
+		}
+	}
+
+	// If the loop completes without finding a match, the transition is invalid.
+	return ErrInvalidStatusTransition
 }
 
-// Assign handles the business logic for assigning a ticket to an agent.
-func (t *Ticket) Assign(agentID uuid.UUID) error {
-	// Business Rule: Cannot modify a closed ticket.
+// Assign sets or changes the assignee of the ticket.
+func (t *Ticket) Assign(assigneeID uuid.UUID) error {
+	// Business rule: You cannot assign a closed ticket.
 	if t.Status == StatusClosed {
 		return errors.New("cannot assign a closed ticket")
 	}
-
-	// Check if the assignment is actually changing (idempotency)
-	if t.AssigneeID != nil && *t.AssigneeID == agentID {
-		return nil
-	}
-
-	t.AssigneeID = &agentID
-
-	// Business Rule: Assignment often moves the status to In Progress.
-	if t.Status == StatusOpen || t.Status == StatusBacklog {
-		t.Status = StatusInProgress
-	}
-
+	t.AssigneeID = &assigneeID
 	now := time.Now().UTC()
 	t.UpdatedAt = &now
-	return nil
-}
-
-// UpdateStatus handles the logic for changing a ticket's status, enforcing state transitions.
-func (t *Ticket) UpdateStatus(newStatus TicketStatus) error {
-	// Business Rule: A closed ticket cannot be modified or reopened.
-	if t.Status == StatusClosed {
-		if newStatus == StatusClosed {
-			return nil // Already closed, idempotent
-		}
-		return errors.New("cannot change the status of a closed ticket")
-	}
-
-	// Example Business Rule: Cannot move from Backlog directly to Closed.
-	if t.Status == StatusBacklog && newStatus == StatusClosed {
-		return errors.New("ticket must be moved to in progress before closing")
-	}
-
-	if t.Status != newStatus {
-		t.Status = newStatus
-		now := time.Now().UTC()
-		t.UpdatedAt = &now
-	}
-
 	return nil
 }
