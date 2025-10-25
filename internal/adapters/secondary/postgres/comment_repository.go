@@ -3,7 +3,6 @@ package postgres
 import (
 	"context"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/lorrc/service-desk-backend/internal/adapters/secondary/postgres/db"
@@ -32,7 +31,7 @@ func mapDBCommentToDomain(dbComment db.Comment) *domain.Comment {
 		ID:        dbComment.ID.Bytes,
 		TicketID:  dbComment.TicketID, // This is a primitive int64
 		AuthorID:  dbComment.AuthorID.Bytes,
-		Body:      dbComment.Body, // <-- THIS IS THE FIX (was dbComment.Body.String)
+		Body:      dbComment.Body,
 		CreatedAt: dbComment.CreatedAt.Time,
 	}
 }
@@ -42,7 +41,7 @@ func (r *CommentRepository) Create(ctx context.Context, comment *domain.Comment)
 	params := db.CreateCommentParams{
 		TicketID: comment.TicketID,
 		AuthorID: pgtype.UUID{Bytes: comment.AuthorID, Valid: true},
-		Body:     comment.Body, // <-- THIS IS THE FIX (was pgtype.Text{...})
+		Body:     comment.Body,
 	}
 
 	dbComment, err := r.q.CreateComment(ctx, params)
