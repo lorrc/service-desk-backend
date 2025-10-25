@@ -12,6 +12,7 @@ import (
 	"github.com/lorrc/service-desk-backend/internal/adapters/secondary/postgres/db"
 	"github.com/lorrc/service-desk-backend/internal/core/domain"
 	"github.com/lorrc/service-desk-backend/internal/core/ports"
+	"github.com/lorrc/service-desk-backend/internal/core/utils" // <-- Import utils
 )
 
 // TicketRepository is the secondary adapter for ticket persistence.
@@ -37,26 +38,18 @@ func mapDBTicketToDomain(dbTicket db.Ticket) *domain.Ticket {
 		Status:    domain.TicketStatus(dbTicket.Status),
 		Priority:  domain.TicketPriority(dbTicket.Priority),
 		CreatedAt: dbTicket.CreatedAt.Time,
+		// ** FIX for Line 43 **
+		// Use helper to convert pgtype.Text -> string
+		Description: utils.FromString(dbTicket.Description),
 	}
 
-	if dbTicket.Description != nil {
-		domainTicket.Description = *dbTicket.Description
-	}
-	// Safely convert pgtype.UUID to uuid.UUID for RequesterID
 	if dbTicket.RequesterID.Valid {
-		// Explicit type cast from [16]byte to uuid.UUID
-		domainTicket.RequesterID = uuid.UUID(dbTicket.RequesterID.Bytes)
+		domainTicket.RequesterID = dbTicket.RequesterID.Bytes
 	}
-
-	// Handle nullable AssigneeID with the correct type cast
 	if dbTicket.AssigneeID.Valid {
-		// 1. Cast the [16]byte to uuid.UUID
 		assigneeUUID := uuid.UUID(dbTicket.AssigneeID.Bytes)
-		// 2. Assign the pointer of the correctly typed variable
 		domainTicket.AssigneeID = &assigneeUUID
 	}
-
-	// Handle nullable UpdatedAt
 	if dbTicket.UpdatedAt.Valid {
 		domainTicket.UpdatedAt = &dbTicket.UpdatedAt.Time
 	}
@@ -66,16 +59,12 @@ func mapDBTicketToDomain(dbTicket db.Ticket) *domain.Ticket {
 
 // Create persists a new ticket entity.
 func (r *TicketRepository) Create(ctx context.Context, ticket *domain.Ticket) (*domain.Ticket, error) {
-
-	var description *string
-	if ticket.Description != "" {
-		description = &ticket.Description
-	}
-
 	params := db.CreateTicketParams{
-		Title:       ticket.Title,
-		Description: description, // <-- This is the fix
-		Priority:    string(ticket.Priority),
+		Title:    ticket.Title,
+		Priority: string(ticket.Priority),
+		// ** FIX for Create **
+		// Use helper to convert string -> pgtype.Text
+		Description: utils.ToString(ticket.Description),
 		RequesterID: pgtype.UUID{Bytes: ticket.RequesterID, Valid: true},
 	}
 	createdTicket, err := r.q.CreateTicket(ctx, params)
@@ -126,32 +115,48 @@ func (r *TicketRepository) Update(ctx context.Context, ticket *domain.Ticket) (*
 	return mapDBTicketToDomain(updatedTicket), nil
 }
 
-// ListByRequester retrieves tickets created by a specific user.
-func (r *TicketRepository) ListByRequester(ctx context.Context, requesterID uuid.UUID) ([]*domain.Ticket, error) {
-	dbTickets, err := r.q.ListTicketsByRequesterID(ctx, pgtype.UUID{Bytes: requesterID, Valid: true})
-	if err != nil {
-		return nil, err
-	}
-
+// mapDBTicketListToDomain is a helper to map slices
+func mapDBTicketListToDomain(dbTickets []db.Ticket) []*domain.Ticket {
 	domainTickets := make([]*domain.Ticket, len(dbTickets))
 	for i, dbTicket := range dbTickets {
 		domainTickets[i] = mapDBTicketToDomain(dbTicket)
 	}
-
-	return domainTickets, nil
+	return domainTickets
 }
 
-// List retrieves all tickets.
-func (r *TicketRepository) List(ctx context.Context) ([]*domain.Ticket, error) {
-	dbTickets, err := r.q.ListTickets(ctx)
+// ListPaginated retrieves all tickets with pagination and optional filters.
+func (r *TicketRepository) ListPaginated(ctx context.Context, params ports.ListTicketsRepoParams) ([]*domain.Ticket, error) {
+	// The dbParams fields (pgtype.Text) now correctly match the ports.ListTicketsRepoParams fields
+	dbParams := db.ListTicketsPaginatedParams{
+		Limit:    params.Limit,
+		Offset:   params.Offset,
+		Status:   params.Status,
+		Priority: params.Priority,
+	}
+
+	dbTickets, err := r.q.ListTicketsPaginated(ctx, dbParams)
 	if err != nil {
 		return nil, err
 	}
 
-	domainTickets := make([]*domain.Ticket, len(dbTickets))
-	for i, dbTicket := range dbTickets {
-		domainTickets[i] = mapDBTicketToDomain(dbTicket)
+	return mapDBTicketListToDomain(dbTickets), nil
+}
+
+// ListByRequesterPaginated retrieves tickets for a specific user with pagination and optional filters.
+func (r *TicketRepository) ListByRequesterPaginated(ctx context.Context, params ports.ListTicketsRepoParams) ([]*domain.Ticket, error) {
+	// The dbParams fields (pgtype.Text) now correctly match the ports.ListTicketsRepoParams fields
+	dbParams := db.ListTicketsByRequesterPaginatedParams{
+		RequesterID: params.RequesterID,
+		Limit:       params.Limit,
+		Offset:      params.Offset,
+		Status:      params.Status,
+		Priority:    params.Priority,
 	}
 
-	return domainTickets, nil
+	dbTickets, err := r.q.ListTicketsByRequesterPaginated(ctx, dbParams)
+	if err != nil {
+		return nil, err
+	}
+
+	return mapDBTicketListToDomain(dbTickets), nil
 }

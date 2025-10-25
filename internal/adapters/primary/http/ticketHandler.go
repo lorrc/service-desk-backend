@@ -75,7 +75,26 @@ func (h *TicketHandler) HandleListTickets(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	tickets, err := h.ticketService.ListTickets(r.Context(), claims.UserID)
+	// Parse pagination and filter query parameters
+	limit := getIntQueryParam(r, "limit", 25)
+	offset := getIntQueryParam(r, "offset", 0)
+	status := getStringQueryParam(r, "status")
+	priority := getStringQueryParam(r, "priority")
+
+	// Enforce a max limit to prevent abuse
+	if limit > 100 {
+		limit = 100
+	}
+
+	params := ports.ListTicketsParams{
+		ViewerID: claims.UserID,
+		Limit:    limit,
+		Offset:   offset,
+		Status:   status,
+		Priority: priority,
+	}
+
+	tickets, err := h.ticketService.ListTickets(r.Context(), params)
 	if err != nil {
 		WriteJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to retrieve tickets"})
 		return
@@ -224,4 +243,29 @@ func (h *TicketHandler) HandleAssignTicket(w http.ResponseWriter, r *http.Reques
 	}
 
 	WriteJSON(w, http.StatusOK, ticket)
+}
+
+// getIntQueryParam safely parses an integer query parameter or returns a default value.
+func getIntQueryParam(r *http.Request, key string, defaultValue int) int {
+	valStr := r.URL.Query().Get(key)
+	if valStr == "" {
+		return defaultValue
+	}
+	valInt, err := strconv.Atoi(valStr)
+	if err != nil {
+		return defaultValue
+	}
+	if valInt < 0 {
+		return defaultValue
+	}
+	return valInt
+}
+
+// getStringQueryParam safely parses a string query parameter, returning nil if it's empty.
+func getStringQueryParam(r *http.Request, key string) *string {
+	valStr := r.URL.Query().Get(key)
+	if valStr == "" {
+		return nil
+	}
+	return &valStr
 }

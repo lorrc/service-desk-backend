@@ -4,8 +4,10 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/lorrc/service-desk-backend/internal/core/domain"
 	"github.com/lorrc/service-desk-backend/internal/core/ports"
+	"github.com/lorrc/service-desk-backend/internal/core/utils"
 )
 
 type TicketService struct {
@@ -114,18 +116,28 @@ func (s *TicketService) AssignTicket(ctx context.Context, params ports.AssignTic
 	return s.ticketRepo.Update(ctx, ticket)
 }
 
-func (s *TicketService) ListTickets(ctx context.Context, viewerID uuid.UUID) ([]*domain.Ticket, error) {
-	// RBAC logic for listing tickets.
-	// Can the user see all tickets, or just their own?
-	canListAll, err := s.authzSvc.Can(ctx, viewerID, "tickets:list:all") // Hypothetical permission
+func (s *TicketService) ListTickets(ctx context.Context, params ports.ListTicketsParams) ([]*domain.Ticket, error) {
+	// 1. RBAC Check
+	canListAll, err := s.authzSvc.Can(ctx, params.ViewerID, "tickets:list:all")
 	if err != nil {
 		return nil, err
 	}
 
-	if canListAll {
-		return s.ticketRepo.List(ctx)
+	repoParams := ports.ListTicketsRepoParams{
+		Limit:    int32(params.Limit),
+		Offset:   int32(params.Offset),
+		Status:   utils.ToNullString(params.Status),   // Use helper
+		Priority: utils.ToNullString(params.Priority), // Use helper
 	}
 
-	// Default to listing only tickets requested by the user.
-	return s.ticketRepo.ListByRequester(ctx, viewerID)
+	// 3. Call the correct repository method based on permissions
+	if canListAll {
+		return s.ticketRepo.ListPaginated(ctx, repoParams)
+	}
+
+	// Default: scope query to the user who made the request
+	repoParams.RequesterID = pgtype.UUID{Bytes: params.ViewerID, Valid: true}
+	return s.ticketRepo.ListByRequesterPaginated(ctx, repoParams)
 }
+
+// ... (rest of TicketService) ...

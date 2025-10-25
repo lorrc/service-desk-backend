@@ -61,6 +61,14 @@ type GetCommentsParams struct {
 	ActorID  uuid.UUID
 }
 
+type ListTicketsParams struct {
+	ViewerID uuid.UUID // The user performing the action
+	Limit    int
+	Offset   int
+	Status   *string // Use pointers for optional string filters
+	Priority *string
+}
+
 // TicketService defines the core business operations for managing the ticket lifecycle.
 // This is a Primary Port (Driver Port).
 type TicketService interface {
@@ -81,7 +89,7 @@ type TicketService interface {
 	// ListTickets handles retrieving a list of tickets.
 	// The viewerID is included so the service can scope the results based on the user's role
 	// (e.g., customers see only their own tickets, agents see their assigned tickets).
-	ListTickets(ctx context.Context, viewerID uuid.UUID) ([]*domain.Ticket, error)
+	ListTickets(ctx context.Context, params ListTicketsParams) ([]*domain.Ticket, error)
 }
 
 // CommentService defines the port for comment-related business logic.

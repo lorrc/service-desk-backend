@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors" // <-- Added import
 
 	"github.com/google/uuid"
 	"github.com/lorrc/service-desk-backend/internal/core/domain"
@@ -38,7 +39,8 @@ func (s *CommentService) canUserAccessTicket(ctx context.Context, ticketID int64
 	// the necessary ownership and RBAC logic ("tickets:read", "tickets:read:all").
 	_, err := s.ticketSvc.GetTicket(ctx, ticketID, actorID)
 	if err != nil {
-		if err == ports.ErrForbidden || err == ports.ErrTicketNotFound {
+		// ** FIX IS HERE: Use errors.Is() for robust checking **
+		if errors.Is(err, ports.ErrForbidden) || errors.Is(err, ports.ErrTicketNotFound) {
 			return false, ports.ErrForbidden // Return a generic Forbidden
 		}
 		return false, err // Other system error

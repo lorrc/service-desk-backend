@@ -16,11 +16,24 @@ SET
 WHERE id = $1
 RETURNING *;
 
--- name: ListTicketsByRequesterID :many
+-- name: ListTicketsPaginated :many
 SELECT * FROM tickets
-WHERE requester_id = $1
-ORDER BY created_at DESC;
+WHERE
+    (status = sqlc.narg('status') OR sqlc.narg('status') IS NULL)
+  AND
+    (priority = sqlc.narg('priority') OR sqlc.narg('priority') IS NULL)
+ORDER BY created_at DESC
+LIMIT sqlc.arg('limit')
+    OFFSET sqlc.arg('offset');
 
--- name: ListTickets :many
+-- name: ListTicketsByRequesterPaginated :many
 SELECT * FROM tickets
-ORDER BY created_at DESC;
+WHERE
+    requester_id = sqlc.arg('requester_id')
+  AND
+    (status = sqlc.narg('status') OR sqlc.narg('status') IS NULL)
+  AND
+    (priority = sqlc.narg('priority') OR sqlc.narg('priority') IS NULL)
+ORDER BY created_at DESC
+LIMIT sqlc.arg('limit')
+    OFFSET sqlc.arg('offset');

@@ -17,9 +17,9 @@ var (
 type TicketStatus string
 
 const (
-	StatusOpen       TicketStatus = "OPEN"
-	StatusInProgress TicketStatus = "IN_PROGRESS"
-	StatusClosed     TicketStatus = "CLOSED"
+	StatusOpen       = "OPEN"
+	StatusInProgress = "IN_PROGRESS"
+	StatusClosed     = "CLOSED"
 )
 
 // TicketPriority represents the urgency of a ticket.

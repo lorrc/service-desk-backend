@@ -40,7 +40,7 @@ type RolePermission struct {
 type Ticket struct {
 	ID          int64              `json:"id"`
 	Title       string             `json:"title"`
-	Description *string            `json:"description"`
+	Description pgtype.Text        `json:"description"`
 	Status      string             `json:"status"`
 	Priority    string             `json:"priority"`
 	RequesterID pgtype.UUID        `json:"requester_id"`

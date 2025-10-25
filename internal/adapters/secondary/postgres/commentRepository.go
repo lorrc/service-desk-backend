@@ -29,9 +29,9 @@ func NewCommentRepository(pool *pgxpool.Pool) ports.CommentRepository {
 // This now correctly handles the mix of primitive and struct types from sqlc.
 func mapDBCommentToDomain(dbComment db.Comment) *domain.Comment {
 	return &domain.Comment{
-		ID:        uuid.UUID(dbComment.ID.Bytes),
+		ID:        dbComment.ID.Bytes,
 		TicketID:  dbComment.TicketID, // This is a primitive int64
-		AuthorID:  uuid.UUID(dbComment.AuthorID.Bytes),
+		AuthorID:  dbComment.AuthorID.Bytes,
 		Body:      dbComment.Body, // <-- THIS IS THE FIX (was dbComment.Body.String)
 		CreatedAt: dbComment.CreatedAt.Time,
 	}
