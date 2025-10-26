@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -11,17 +12,20 @@ import (
 )
 
 type TicketService struct {
-	ticketRepo ports.TicketRepository
-	authzSvc   ports.AuthorizationService
+	ticketRepo  ports.TicketRepository
+	authzSvc    ports.AuthorizationService
+	notifier    ports.Notifier
+	broadcaster ports.EventBroadcaster
 }
 
 var _ ports.TicketService = (*TicketService)(nil)
 
-// NewTicketService now requires an AuthorizationService.
-func NewTicketService(ticketRepo ports.TicketRepository, authzSvc ports.AuthorizationService) ports.TicketService {
+func NewTicketService(ticketRepo ports.TicketRepository, authzSvc ports.AuthorizationService, notifier ports.Notifier, broadcaster ports.EventBroadcaster) ports.TicketService {
 	return &TicketService{
-		ticketRepo: ticketRepo,
-		authzSvc:   authzSvc,
+		ticketRepo:  ticketRepo,
+		authzSvc:    authzSvc,
+		notifier:    notifier,
+		broadcaster: broadcaster,
 	}
 }
 
@@ -73,7 +77,7 @@ func (s *TicketService) GetTicket(ctx context.Context, ticketID int64, viewerID 
 }
 
 func (s *TicketService) UpdateStatus(ctx context.Context, params ports.UpdateStatusParams) (*domain.Ticket, error) {
-	// Authorization Check
+	// 1. Authorization Check
 	canUpdate, err := s.authzSvc.Can(ctx, params.ActorID, "tickets:update:status")
 	if err != nil {
 		return nil, err
@@ -82,6 +86,7 @@ func (s *TicketService) UpdateStatus(ctx context.Context, params ports.UpdateSta
 		return nil, ports.ErrForbidden
 	}
 
+	// 2. Fetch and update domain entity
 	ticket, err := s.ticketRepo.GetByID(ctx, params.TicketID)
 	if err != nil {
 		return nil, err
@@ -91,7 +96,30 @@ func (s *TicketService) UpdateStatus(ctx context.Context, params ports.UpdateSta
 		return nil, err
 	}
 
-	return s.ticketRepo.Update(ctx, ticket)
+	updatedTicket, err := s.ticketRepo.Update(ctx, ticket)
+	if err != nil {
+		return nil, err
+	}
+
+	// 3. Send email notification (asynchronously)
+	if ticket.RequesterID != params.ActorID {
+		go s.notifier.Notify(ctx, ports.NotificationParams{
+			RecipientUserID: ticket.RequesterID,
+			Subject:         fmt.Sprintf("Your ticket status has been updated: #%d", ticket.ID),
+			Message:         fmt.Sprintf("The status of your ticket '%s' was changed to %s.", ticket.Title, ticket.Status),
+			TicketID:        ticket.ID,
+		})
+	}
+
+	// 4. Hbroadcast real-time event (asynchronously)
+	event := domain.Event{
+		Type:     domain.EventStatusUpdated,
+		Payload:  updatedTicket,
+		TicketID: updatedTicket.ID,
+	}
+	go s.broadcaster.Broadcast(event)
+
+	return updatedTicket, nil
 }
 
 func (s *TicketService) AssignTicket(ctx context.Context, params ports.AssignTicketParams) (*domain.Ticket, error) {

@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors" // <-- Added import
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/lorrc/service-desk-backend/internal/core/domain"
@@ -14,6 +15,8 @@ type CommentService struct {
 	commentRepo ports.CommentRepository
 	ticketSvc   ports.TicketService
 	authzSvc    ports.AuthorizationService
+	notifier    ports.Notifier
+	broadcaster ports.EventBroadcaster
 }
 
 // Ensure implementation matches the interface.
@@ -24,11 +27,15 @@ func NewCommentService(
 	commentRepo ports.CommentRepository,
 	ticketSvc ports.TicketService,
 	authzSvc ports.AuthorizationService,
+	notifier ports.Notifier,
+	broadcaster ports.EventBroadcaster,
 ) ports.CommentService {
 	return &CommentService{
 		commentRepo: commentRepo,
 		ticketSvc:   ticketSvc,
 		authzSvc:    authzSvc,
+		notifier:    notifier,
+		broadcaster: broadcaster,
 	}
 }
 
@@ -60,12 +67,11 @@ func (s *CommentService) CreateComment(ctx context.Context, params ports.CreateC
 	}
 
 	// 2. Check if the user can access the ticket they're trying to comment on.
-	canAccess, err := s.canUserAccessTicket(ctx, params.TicketID, params.ActorID)
+	// We use GetTicket directly here to fetch the ticket object for the notification.
+	ticket, err := s.ticketSvc.GetTicket(ctx, params.TicketID, params.ActorID)
 	if err != nil {
+		// GetTicket already returns ErrForbidden if access is denied
 		return nil, err
-	}
-	if !canAccess {
-		return nil, ports.ErrForbidden
 	}
 
 	// 3. Create the domain entity.
@@ -75,7 +81,31 @@ func (s *CommentService) CreateComment(ctx context.Context, params ports.CreateC
 	}
 
 	// 4. Persist the comment.
-	return s.commentRepo.Create(ctx, comment)
+	newComment, err := s.commentRepo.Create(ctx, comment)
+	if err != nil {
+		return nil, err
+	}
+
+	// 5. Send email notification (asynchronously)
+	// We notify the requester *unless* they are the one who made the comment.
+	if ticket.RequesterID != params.ActorID {
+		go s.notifier.Notify(ctx, ports.NotificationParams{
+			RecipientUserID: ticket.RequesterID,
+			Subject:         fmt.Sprintf("A new comment was added to your ticket: #%d", ticket.ID),
+			Message:         fmt.Sprintf("A new comment has been added to your ticket '%s'.", ticket.Title),
+			TicketID:        ticket.ID,
+		})
+	}
+
+	// 6. Hbroadcast real-time event (asynchronously)
+	event := domain.Event{
+		Type:     domain.EventCommentAdded,
+		Payload:  newComment,
+		TicketID: newComment.TicketID,
+	}
+	go s.broadcaster.Broadcast(event)
+
+	return newComment, nil
 }
 
 // GetCommentsForTicket retrieves all comments for a specific ticket.

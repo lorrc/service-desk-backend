@@ -69,6 +69,13 @@ type ListTicketsParams struct {
 	Priority *string
 }
 
+type NotificationParams struct {
+	RecipientUserID uuid.UUID
+	Subject         string
+	Message         string
+	TicketID        int64
+}
+
 // TicketService defines the core business operations for managing the ticket lifecycle.
 // This is a Primary Port (Driver Port).
 type TicketService interface {
@@ -96,4 +103,14 @@ type TicketService interface {
 type CommentService interface {
 	CreateComment(ctx context.Context, params CreateCommentParams) (*domain.Comment, error)
 	GetCommentsForTicket(ctx context.Context, params GetCommentsParams) ([]*domain.Comment, error)
+}
+
+// Notifier defines the port for sending asynchronous notifications.
+type Notifier interface {
+	Notify(ctx context.Context, params NotificationParams)
+}
+
+// EventBroadcaster defines the port for broadcasting real-time events.
+type EventBroadcaster interface {
+	Broadcast(event domain.Event) error
 }

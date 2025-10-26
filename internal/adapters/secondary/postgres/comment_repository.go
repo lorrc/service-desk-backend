@@ -25,7 +25,6 @@ func NewCommentRepository(pool *pgxpool.Pool) ports.CommentRepository {
 }
 
 // mapDBCommentToDomain converts a db.Comment to a domain.Comment
-// This now correctly handles the mix of primitive and struct types from sqlc.
 func mapDBCommentToDomain(dbComment db.Comment) *domain.Comment {
 	return &domain.Comment{
 		ID:        dbComment.ID.Bytes,
