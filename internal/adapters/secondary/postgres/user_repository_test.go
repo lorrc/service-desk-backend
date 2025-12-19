@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/lorrc/service-desk-backend/internal/core/domain"
+	"github.com/lorrc/service-desk-backend/internal/core/errors"
 	"github.com/lorrc/service-desk-backend/internal/core/ports"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -59,5 +60,5 @@ func TestUserRepository_GetByEmail_NotFound(t *testing.T) {
 
 	_, err := userRepo.GetByEmail(ctx, "nonexistent@example.com")
 	require.Error(t, err)
-	assert.ErrorIs(t, err, ports.ErrUserNotFound)
+	assert.ErrorIs(t, err, errors.ErrUserNotFound)
 }

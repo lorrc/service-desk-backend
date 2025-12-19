@@ -170,22 +170,31 @@ func (s *TicketService) ListTickets(ctx context.Context, params ports.ListTicket
 		return nil, err
 	}
 
-	// 2. Prepare repository parameters
+	fetchLimit := params.Limit + 1
+
 	repoParams := ports.ListTicketsRepoParams{
-		Limit:    int32(params.Limit),
+		Limit:    int32(fetchLimit),
 		Offset:   int32(params.Offset),
 		Status:   utils.ToNullString(params.Status),
 		Priority: utils.ToNullString(params.Priority),
 	}
 
-	// 3. Query based on permissions
+	// ... execute query ...
+	var tickets []*domain.Ticket
+	var err error
+
 	if canListAll {
-		return s.ticketRepo.ListPaginated(ctx, repoParams)
+		tickets, err = s.ticketRepo.ListPaginated(ctx, repoParams)
+	} else {
+		repoParams.RequesterID = pgtype.UUID{Bytes: params.ViewerID, Valid: true}
+		tickets, err = s.ticketRepo.ListByRequesterPaginated(ctx, repoParams)
 	}
 
-	// Default: scope query to the requesting user's tickets
-	repoParams.RequesterID = pgtype.UUID{Bytes: params.ViewerID, Valid: true}
-	return s.ticketRepo.ListByRequesterPaginated(ctx, repoParams)
+	if err != nil {
+		return nil, err
+	}
+
+	return tickets, nil
 }
 
 // notifyStatusUpdate sends email notification for status changes

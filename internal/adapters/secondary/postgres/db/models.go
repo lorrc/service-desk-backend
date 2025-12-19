@@ -9,7 +9,7 @@ import (
 )
 
 type Comment struct {
-	ID        pgtype.UUID        `json:"id"`
+	ID        int64              `json:"id"`
 	TicketID  int64              `json:"ticket_id"`
 	AuthorID  pgtype.UUID        `json:"author_id"`
 	Body      string             `json:"body"`
@@ -24,7 +24,7 @@ type Organization struct {
 
 type Permission struct {
 	ID   int32  `json:"id"`
-	Code string `json:"code"`
+	Name string `json:"name"`
 }
 
 type Role struct {
@@ -54,7 +54,7 @@ type User struct {
 	OrganizationID pgtype.UUID        `json:"organization_id"`
 	FullName       string             `json:"full_name"`
 	Email          string             `json:"email"`
-	PasswordHash   string             `json:"password_hash"`
+	HashedPassword string             `json:"hashed_password"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 

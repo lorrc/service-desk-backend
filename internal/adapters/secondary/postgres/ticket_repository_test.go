@@ -7,7 +7,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/lorrc/service-desk-backend/internal/core/domain"
-	"github.com/lorrc/service-desk-backend/internal/core/mocks"
 	"github.com/lorrc/service-desk-backend/internal/core/ports"
 	"github.com/lorrc/service-desk-backend/internal/core/utils"
 	"github.com/stretchr/testify/assert"
