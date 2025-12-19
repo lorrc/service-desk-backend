@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -18,6 +19,7 @@ type TicketService struct {
 	authzSvc    ports.AuthorizationService
 	notifier    ports.Notifier
 	broadcaster ports.EventBroadcaster
+	wg          sync.WaitGroup
 }
 
 var _ ports.TicketService = (*TicketService)(nil)
@@ -180,34 +182,31 @@ func (s *TicketService) ListTickets(ctx context.Context, params ports.ListTicket
 	}
 
 	// ... execute query ...
-	var tickets []*domain.Ticket
-	var err error
-
+	// 3. Query based on permissions
 	if canListAll {
-		tickets, err = s.ticketRepo.ListPaginated(ctx, repoParams)
-	} else {
-		repoParams.RequesterID = pgtype.UUID{Bytes: params.ViewerID, Valid: true}
-		tickets, err = s.ticketRepo.ListByRequesterPaginated(ctx, repoParams)
+		return s.ticketRepo.ListPaginated(ctx, repoParams)
 	}
 
-	if err != nil {
-		return nil, err
-	}
-
-	return tickets, nil
+	// Default: scope query to the requesting user's tickets
+	repoParams.RequesterID = pgtype.UUID{Bytes: params.ViewerID, Valid: true}
+	return s.ticketRepo.ListByRequesterPaginated(ctx, repoParams)
 }
 
 // notifyStatusUpdate sends email notification for status changes
 func (s *TicketService) notifyStatusUpdate(ticket *domain.Ticket, actorID uuid.UUID) {
-	// Use background context since the HTTP request may be done
-	ctx := context.Background()
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		// Use background context since the HTTP request may be done
+		ctx := context.Background()
 
-	s.notifier.Notify(ctx, ports.NotificationParams{
-		RecipientUserID: ticket.RequesterID,
-		Subject:         fmt.Sprintf("Your ticket status has been updated: #%d", ticket.ID),
-		Message:         fmt.Sprintf("The status of your ticket '%s' was changed to %s.", ticket.Title, ticket.Status),
-		TicketID:        ticket.ID,
-	})
+		s.notifier.Notify(ctx, ports.NotificationParams{
+			RecipientUserID: ticket.RequesterID,
+			Subject:         fmt.Sprintf("Your ticket status has been updated: #%d", ticket.ID),
+			Message:         fmt.Sprintf("The status of your ticket '%s' was changed to %s.", ticket.Title, ticket.Status),
+			TicketID:        ticket.ID,
+		})
+	}()
 }
 
 // broadcastStatusUpdate sends real-time event for status changes
@@ -218,4 +217,8 @@ func (s *TicketService) broadcastStatusUpdate(ticket *domain.Ticket) {
 		TicketID: ticket.ID,
 	}
 	_ = s.broadcaster.Broadcast(event)
+}
+
+func (s *TicketService) Shutdown() {
+	s.wg.Wait()
 }

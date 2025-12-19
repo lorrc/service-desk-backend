@@ -12,19 +12,14 @@ import (
 
 // AuthService implements authentication business logic
 type AuthService struct {
-	userRepo ports.UserRepository
-	// defaultOrgID is used when no organization is specified
-	// In a real system, this would be handled differently
+	userRepo     ports.UserRepository
 	defaultOrgID uuid.UUID
 }
 
 var _ ports.AuthService = (*AuthService)(nil)
 
 // NewAuthService creates a new authentication service
-func NewAuthService(userRepo ports.UserRepository) ports.AuthService {
-	// Default organization ID - should come from config in production
-	defaultOrgID, _ := uuid.Parse("00000000-0000-0000-0000-000000000001")
-
+func NewAuthService(userRepo ports.UserRepository, defaultOrgID uuid.UUID) ports.AuthService {
 	return &AuthService{
 		userRepo:     userRepo,
 		defaultOrgID: defaultOrgID,

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	httpAdapter "github.com/lorrc/service-desk-backend/internal/adapters/primary/http"
@@ -101,6 +102,12 @@ func main() {
 	// Error Handler
 	errorHandler := httpAdapter.NewErrorHandler(logger)
 
+	// Parse Default Org ID from config
+	defaultOrgID, err := uuid.Parse(cfg.App.DefaultOrgID)
+	if err != nil {
+		logger.Error("invalid default organization id in configuration", "error", err)
+		os.Exit(1)
+	}
 	// Repositories (Secondary Adapters)
 	userRepo := postgres.NewUserRepository(pool)
 	ticketRepo := postgres.NewTicketRepository(pool)
@@ -111,7 +118,7 @@ func main() {
 	notifier := email.NewMockSMTPNotifier(userRepo)
 
 	// Services (Core)
-	authService := services.NewAuthService(userRepo)
+	authService := services.NewAuthService(userRepo, defaultOrgID)
 	authzService := services.NewAuthorizationService(authzRepo)
 	ticketService := services.NewTicketService(ticketRepo, authzService, notifier, hub)
 	commentService := services.NewCommentService(commentRepo, ticketService, authzService, notifier, hub)

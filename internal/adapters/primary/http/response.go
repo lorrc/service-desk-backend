@@ -84,12 +84,13 @@ func WritePaginated[T any](w http.ResponseWriter, data []T, limit, offset int, t
 // WritePaginatedSimple writes a paginated response without total count
 // Useful when counting total records is expensive
 func WritePaginatedSimple[T any](w http.ResponseWriter, data []T, limit, offset int) {
-	// FIX: Check if we got more than we asked for (the original limit)
+	// FIX: logic to determine hasMore based on fetching limit + 1
+	// If we received more items than the requested limit, we know there are more pages.
 	hasMore := len(data) > limit
 
-	// If we have more, slice off the extra item so the client only sees 'limit' items
 	responseItems := data
 	if hasMore {
+		// Slice the data to return only the requested amount
 		responseItems = data[:limit]
 	}
 

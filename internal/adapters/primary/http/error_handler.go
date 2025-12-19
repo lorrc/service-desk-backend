@@ -194,7 +194,7 @@ func (h *ErrorHandler) writeValidationErrorResponse(w http.ResponseWriter, errs 
 	})
 }
 
-// Helper function to handle errors inline in handlers
+// HandleError Helper function to handle errors inline in handlers
 // Usage: if HandleError(w, r, err, h.errorHandler) { return }
 func HandleError(w http.ResponseWriter, r *http.Request, err error, handler *ErrorHandler) bool {
 	if err != nil {

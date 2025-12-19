@@ -87,9 +87,10 @@ type LoggingConfig struct {
 
 // AppConfig holds application metadata
 type AppConfig struct {
-	Name        string
-	Version     string
-	Environment string // development, staging, production
+	Name         string
+	Version      string
+	Environment  string
+	DefaultOrgID string
 }
 
 // Load loads configuration from environment variables
@@ -138,9 +139,10 @@ func Load() (*Config, error) {
 			Format: getEnvOrDefault("LOG_FORMAT", "json"),
 		},
 		App: AppConfig{
-			Name:        getEnvOrDefault("APP_NAME", "service-desk"),
-			Version:     getEnvOrDefault("APP_VERSION", "dev"),
-			Environment: getEnvOrDefault("APP_ENV", "development"),
+			Name:         getEnvOrDefault("APP_NAME", "service-desk"),
+			Version:      getEnvOrDefault("APP_VERSION", "dev"),
+			Environment:  getEnvOrDefault("APP_ENV", "development"),
+			DefaultOrgID: getEnvOrDefault("DEFAULT_ORG_ID", "00000000-0000-0000-0000-000000000001"),
 		},
 	}
 

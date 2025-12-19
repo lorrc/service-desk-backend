@@ -7,13 +7,13 @@ import (
 
 // Domain errors - these represent business rule violations
 var (
-	// Authentication & Authorization
+	// ErrInvalidCredentials Authentication & Authorization
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	ErrUserExists         = errors.New("user already exists")
 	ErrForbidden          = errors.New("action forbidden")
 	ErrUnauthorized       = errors.New("unauthorized")
 
-	// User validation
+	// ErrUserNotFound User validation
 	ErrUserNotFound     = errors.New("user not found")
 	ErrEmailRequired    = errors.New("email is required")
 	ErrEmailInvalid     = errors.New("email format is invalid")
@@ -22,7 +22,7 @@ var (
 	ErrFullNameRequired = errors.New("full name is required")
 	ErrFullNameTooLong  = errors.New("full name exceeds maximum length")
 
-	// Ticket validation
+	// ErrTicketNotFound Ticket validation
 	ErrTicketNotFound          = errors.New("ticket not found")
 	ErrTitleRequired           = errors.New("title is required")
 	ErrTitleTooLong            = errors.New("title exceeds maximum length of 255 characters")
@@ -33,13 +33,13 @@ var (
 	ErrRequesterRequired       = errors.New("requester ID is required")
 	ErrCannotAssignClosed      = errors.New("cannot assign a closed ticket")
 
-	// Comment validation
+	// ErrCommentBodyRequired Comment validation
 	ErrCommentBodyRequired = errors.New("comment body is required")
 	ErrCommentBodyTooLong  = errors.New("comment body exceeds maximum length")
 	ErrTicketIDRequired    = errors.New("ticket ID is required")
 	ErrAuthorIDRequired    = errors.New("author ID is required")
 
-	// Generic
+	// ErrNotFound Generic
 	ErrNotFound    = errors.New("resource not found")
 	ErrInternal    = errors.New("internal server error")
 	ErrBadRequest  = errors.New("bad request")
@@ -67,7 +67,7 @@ func (e *AppError) Unwrap() error {
 	return e.Err
 }
 
-// Error constructors for common cases
+// NewBadRequestError Error constructors for common cases
 func NewBadRequestError(err error, message string) *AppError {
 	return &AppError{
 		Err:        err,

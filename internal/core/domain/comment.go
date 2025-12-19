@@ -13,7 +13,7 @@ const (
 
 // Comment is the core domain entity for a ticket comment.
 type Comment struct {
-	ID        uuid.UUID
+	ID        int64
 	TicketID  int64
 	AuthorID  uuid.UUID
 	Body      string

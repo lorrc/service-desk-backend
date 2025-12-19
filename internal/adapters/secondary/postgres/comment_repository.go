@@ -28,7 +28,7 @@ func NewCommentRepository(pool *pgxpool.Pool) ports.CommentRepository {
 // mapDBCommentToDomain converts a db.Comment to a domain.Comment.
 func mapDBCommentToDomain(dbComment db.Comment) *domain.Comment {
 	return &domain.Comment{
-		ID:        dbComment.ID.Bytes,
+		ID:        dbComment.ID,
 		TicketID:  dbComment.TicketID,
 		AuthorID:  dbComment.AuthorID.Bytes,
 		Body:      dbComment.Body,

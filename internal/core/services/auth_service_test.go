@@ -17,10 +17,11 @@ import (
 
 func TestAuthService_Register(t *testing.T) {
 	ctx := context.Background()
+	testOrgID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 
 	t.Run("success", func(t *testing.T) {
 		mockUserRepo := mocks.NewMockUserRepository()
-		svc := services.NewAuthService(mockUserRepo)
+		svc := services.NewAuthService(mockUserRepo, testOrgID)
 
 		// User doesn't exist yet
 		mockUserRepo.On("GetByEmail", ctx, "newuser@example.com").
@@ -48,7 +49,7 @@ func TestAuthService_Register(t *testing.T) {
 
 	t.Run("user already exists", func(t *testing.T) {
 		mockUserRepo := mocks.NewMockUserRepository()
-		svc := services.NewAuthService(mockUserRepo)
+		svc := services.NewAuthService(mockUserRepo, testOrgID)
 
 		existingUser := &domain.User{
 			ID:    uuid.New(),
@@ -66,7 +67,7 @@ func TestAuthService_Register(t *testing.T) {
 
 	t.Run("weak password", func(t *testing.T) {
 		mockUserRepo := mocks.NewMockUserRepository()
-		svc := services.NewAuthService(mockUserRepo)
+		svc := services.NewAuthService(mockUserRepo, testOrgID)
 
 		user, err := svc.Register(ctx, "User", "user@example.com", "weak", uuid.Nil)
 
@@ -82,7 +83,7 @@ func TestAuthService_Register(t *testing.T) {
 
 	t.Run("invalid email", func(t *testing.T) {
 		mockUserRepo := mocks.NewMockUserRepository()
-		svc := services.NewAuthService(mockUserRepo)
+		svc := services.NewAuthService(mockUserRepo, testOrgID)
 
 		user, err := svc.Register(ctx, "User", "invalid-email", "Password123", uuid.Nil)
 
@@ -95,7 +96,7 @@ func TestAuthService_Register(t *testing.T) {
 
 	t.Run("empty full name", func(t *testing.T) {
 		mockUserRepo := mocks.NewMockUserRepository()
-		svc := services.NewAuthService(mockUserRepo)
+		svc := services.NewAuthService(mockUserRepo, testOrgID)
 
 		user, err := svc.Register(ctx, "", "user@example.com", "Password123", uuid.Nil)
 
@@ -109,10 +110,11 @@ func TestAuthService_Register(t *testing.T) {
 
 func TestAuthService_Login(t *testing.T) {
 	ctx := context.Background()
+	testOrgID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 
 	t.Run("success", func(t *testing.T) {
 		mockUserRepo := mocks.NewMockUserRepository()
-		svc := services.NewAuthService(mockUserRepo)
+		svc := services.NewAuthService(mockUserRepo, testOrgID)
 
 		// Create a valid password hash
 		hash, _ := domain.HashPassword("Password123")
@@ -136,7 +138,7 @@ func TestAuthService_Login(t *testing.T) {
 
 	t.Run("user not found", func(t *testing.T) {
 		mockUserRepo := mocks.NewMockUserRepository()
-		svc := services.NewAuthService(mockUserRepo)
+		svc := services.NewAuthService(mockUserRepo, testOrgID)
 
 		mockUserRepo.On("GetByEmail", ctx, "unknown@example.com").
 			Return(nil, apperrors.ErrUserNotFound)
@@ -150,7 +152,7 @@ func TestAuthService_Login(t *testing.T) {
 
 	t.Run("wrong password", func(t *testing.T) {
 		mockUserRepo := mocks.NewMockUserRepository()
-		svc := services.NewAuthService(mockUserRepo)
+		svc := services.NewAuthService(mockUserRepo, testOrgID)
 
 		hash, _ := domain.HashPassword("Password123")
 
@@ -171,7 +173,7 @@ func TestAuthService_Login(t *testing.T) {
 
 	t.Run("empty email", func(t *testing.T) {
 		mockUserRepo := mocks.NewMockUserRepository()
-		svc := services.NewAuthService(mockUserRepo)
+		svc := services.NewAuthService(mockUserRepo, testOrgID)
 
 		user, err := svc.Login(ctx, "", "Password123")
 
@@ -182,7 +184,7 @@ func TestAuthService_Login(t *testing.T) {
 
 	t.Run("empty password", func(t *testing.T) {
 		mockUserRepo := mocks.NewMockUserRepository()
-		svc := services.NewAuthService(mockUserRepo)
+		svc := services.NewAuthService(mockUserRepo, testOrgID)
 
 		user, err := svc.Login(ctx, "user@example.com", "")
 
