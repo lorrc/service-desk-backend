@@ -2,11 +2,12 @@ package services
 
 import (
 	"context"
-	"errors" // <-- Added import
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/lorrc/service-desk-backend/internal/core/domain"
+	apperrors "github.com/lorrc/service-desk-backend/internal/core/errors"
 	"github.com/lorrc/service-desk-backend/internal/core/ports"
 )
 
@@ -46,9 +47,8 @@ func (s *CommentService) canUserAccessTicket(ctx context.Context, ticketID int64
 	// the necessary ownership and RBAC logic ("tickets:read", "tickets:read:all").
 	_, err := s.ticketSvc.GetTicket(ctx, ticketID, actorID)
 	if err != nil {
-		// ** FIX IS HERE: Use errors.Is() for robust checking **
-		if errors.Is(err, ports.ErrForbidden) || errors.Is(err, ports.ErrTicketNotFound) {
-			return false, ports.ErrForbidden // Return a generic Forbidden
+		if errors.Is(err, apperrors.ErrForbidden) || errors.Is(err, apperrors.ErrTicketNotFound) {
+			return false, apperrors.ErrForbidden // Return a generic Forbidden
 		}
 		return false, err // Other system error
 	}
@@ -63,7 +63,7 @@ func (s *CommentService) CreateComment(ctx context.Context, params ports.CreateC
 		return nil, err
 	}
 	if !canCreate {
-		return nil, ports.ErrForbidden
+		return nil, apperrors.ErrForbidden
 	}
 
 	// 2. Check if the user can access the ticket they're trying to comment on.
@@ -74,8 +74,13 @@ func (s *CommentService) CreateComment(ctx context.Context, params ports.CreateC
 		return nil, err
 	}
 
-	// 3. Create the domain entity.
-	comment, err := domain.NewComment(params.TicketID, params.ActorID, params.Body)
+	// 3. Create the domain entity using the new params-based constructor.
+	commentParams := domain.CommentParams{
+		TicketID: params.TicketID,
+		AuthorID: params.ActorID,
+		Body:     params.Body,
+	}
+	comment, err := domain.NewComment(commentParams)
 	if err != nil {
 		return nil, err // e.g., validation error
 	}
@@ -89,7 +94,7 @@ func (s *CommentService) CreateComment(ctx context.Context, params ports.CreateC
 	// 5. Send email notification (asynchronously)
 	// We notify the requester *unless* they are the one who made the comment.
 	if ticket.RequesterID != params.ActorID {
-		go s.notifier.Notify(ctx, ports.NotificationParams{
+		go s.notifier.Notify(context.Background(), ports.NotificationParams{
 			RecipientUserID: ticket.RequesterID,
 			Subject:         fmt.Sprintf("A new comment was added to your ticket: #%d", ticket.ID),
 			Message:         fmt.Sprintf("A new comment has been added to your ticket '%s'.", ticket.Title),
@@ -97,13 +102,15 @@ func (s *CommentService) CreateComment(ctx context.Context, params ports.CreateC
 		})
 	}
 
-	// 6. Hbroadcast real-time event (asynchronously)
+	// 6. Broadcast real-time event (asynchronously)
 	event := domain.Event{
 		Type:     domain.EventCommentAdded,
 		Payload:  newComment,
 		TicketID: newComment.TicketID,
 	}
-	go s.broadcaster.Broadcast(event)
+	go func() {
+		_ = s.broadcaster.Broadcast(event)
+	}()
 
 	return newComment, nil
 }
@@ -116,7 +123,7 @@ func (s *CommentService) GetCommentsForTicket(ctx context.Context, params ports.
 		return nil, err
 	}
 	if !canRead {
-		return nil, ports.ErrForbidden
+		return nil, apperrors.ErrForbidden
 	}
 
 	// 2. Check if the user can access the ticket to read its comments.
@@ -125,7 +132,7 @@ func (s *CommentService) GetCommentsForTicket(ctx context.Context, params ports.
 		return nil, err
 	}
 	if !canAccess {
-		return nil, ports.ErrForbidden
+		return nil, apperrors.ErrForbidden
 	}
 
 	// 3. Retrieve the comments.

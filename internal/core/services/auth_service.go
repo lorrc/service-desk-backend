@@ -6,59 +6,100 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/lorrc/service-desk-backend/internal/core/domain"
+	apperrors "github.com/lorrc/service-desk-backend/internal/core/errors"
 	"github.com/lorrc/service-desk-backend/internal/core/ports"
 )
 
+// AuthService implements authentication business logic
 type AuthService struct {
 	userRepo ports.UserRepository
+	// defaultOrgID is used when no organization is specified
+	// In a real system, this would be handled differently
+	defaultOrgID uuid.UUID
 }
 
 var _ ports.AuthService = (*AuthService)(nil)
 
+// NewAuthService creates a new authentication service
 func NewAuthService(userRepo ports.UserRepository) ports.AuthService {
-	return &AuthService{userRepo: userRepo}
+	// Default organization ID - should come from config in production
+	defaultOrgID, _ := uuid.Parse("00000000-0000-0000-0000-000000000001")
+
+	return &AuthService{
+		userRepo:     userRepo,
+		defaultOrgID: defaultOrgID,
+	}
 }
 
-// Register now correctly matches the ports.AuthService interface signature.
+// NewAuthServiceWithOrg creates an auth service with a specific default org
+func NewAuthServiceWithOrg(userRepo ports.UserRepository, defaultOrgID uuid.UUID) ports.AuthService {
+	return &AuthService{
+		userRepo:     userRepo,
+		defaultOrgID: defaultOrgID,
+	}
+}
+
+// Register creates a new user account with validated credentials
 func (s *AuthService) Register(ctx context.Context, fullName, email, password string, orgID uuid.UUID) (*domain.User, error) {
+	// Validate registration parameters
+	params := domain.UserRegistrationParams{
+		FullName: fullName,
+		Email:    email,
+		Password: password,
+	}
+
+	if err := params.Validate(); err != nil {
+		return nil, err
+	}
+
+	// Check if user already exists
 	_, err := s.userRepo.GetByEmail(ctx, email)
 	if err == nil {
-		return nil, ports.ErrUserExists
+		return nil, apperrors.ErrUserExists
 	}
-	if !errors.Is(err, ports.ErrUserNotFound) {
+	if !errors.Is(err, apperrors.ErrUserNotFound) {
 		return nil, err // An actual DB error occurred
 	}
 
-	hashedPassword, err := domain.HashPassword(password)
+	// Determine organization ID
+	targetOrgID := orgID
+	if targetOrgID == uuid.Nil {
+		targetOrgID = s.defaultOrgID
+	}
+
+	// Create user with validated params
+	user, err := domain.NewUser(params, targetOrgID)
 	if err != nil {
 		return nil, err
 	}
 
-	// Use the hardcoded default organization ID from the migration script,
-	// ignoring the orgID parameter for this phase of the project.
-	defaultOrgID, _ := uuid.Parse("00000000-0000-0000-0000-000000000001")
-
-	user := &domain.User{
-		Email:          email,
-		FullName:       fullName,
-		PasswordHash:   hashedPassword,
-		OrganizationID: defaultOrgID,
-	}
-
+	// Persist the user
 	return s.userRepo.Create(ctx, user)
 }
 
+// Login authenticates a user with email and password
 func (s *AuthService) Login(ctx context.Context, email, password string) (*domain.User, error) {
+	// Basic validation
+	if email == "" {
+		return nil, apperrors.ErrEmailRequired
+	}
+	if password == "" {
+		return nil, apperrors.ErrPasswordRequired
+	}
+
+	// Find user by email
 	user, err := s.userRepo.GetByEmail(ctx, email)
 	if err != nil {
-		if errors.Is(err, ports.ErrUserNotFound) {
-			return nil, ports.ErrInvalidCredentials
+		if errors.Is(err, apperrors.ErrUserNotFound) {
+			// Don't reveal whether email exists
+			return nil, apperrors.ErrInvalidCredentials
 		}
 		return nil, err
 	}
 
+	// Verify password
 	if !user.CheckPassword(password) {
-		return nil, ports.ErrInvalidCredentials
+		return nil, apperrors.ErrInvalidCredentials
 	}
 
 	return user, nil

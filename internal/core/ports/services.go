@@ -2,19 +2,12 @@ package ports
 
 import (
 	"context"
-	"errors"
 
 	"github.com/google/uuid"
 	"github.com/lorrc/service-desk-backend/internal/core/domain"
 )
 
-// Custom errors for services and repositories
-var (
-	ErrInvalidCredentials = errors.New("invalid credentials")
-	ErrUserExists         = errors.New("user already exists")
-	ErrForbidden          = errors.New("action forbidden")
-)
-
+// AuthService defines the port for authentication business logic.
 type AuthService interface {
 	Register(ctx context.Context, fullName, email, password string, orgID uuid.UUID) (*domain.User, error)
 	Login(ctx context.Context, email, password string) (*domain.User, error)
@@ -37,38 +30,39 @@ type CreateTicketParams struct {
 type UpdateStatusParams struct {
 	TicketID int64
 	Status   domain.TicketStatus
-	// ActorID is the user performing the action (crucial for authorization and auditing).
-	ActorID uuid.UUID
+	ActorID  uuid.UUID
 }
 
 // AssignTicketParams defines the input for assigning a ticket.
 type AssignTicketParams struct {
-	TicketID int64
-	// AssigneeID is the user the ticket is being assigned to.
+	TicketID   int64
 	AssigneeID uuid.UUID
-	// ActorID is the user performing the action.
-	ActorID uuid.UUID
+	ActorID    uuid.UUID
 }
 
+// CreateCommentParams defines the input for creating a comment.
 type CreateCommentParams struct {
 	TicketID int64
 	ActorID  uuid.UUID
 	Body     string
 }
 
+// GetCommentsParams defines the input for retrieving comments.
 type GetCommentsParams struct {
 	TicketID int64
 	ActorID  uuid.UUID
 }
 
+// ListTicketsParams defines the input for listing tickets.
 type ListTicketsParams struct {
-	ViewerID uuid.UUID // The user performing the action
+	ViewerID uuid.UUID
 	Limit    int
 	Offset   int
-	Status   *string // Use pointers for optional string filters
+	Status   *string
 	Priority *string
 }
 
+// NotificationParams defines the input for sending a notification.
 type NotificationParams struct {
 	RecipientUserID uuid.UUID
 	Subject         string
@@ -76,26 +70,12 @@ type NotificationParams struct {
 	TicketID        int64
 }
 
-// TicketService defines the core business operations for managing the ticket lifecycle.
-// This is a Primary Port (Driver Port).
+// TicketService defines the core business operations for managing tickets.
 type TicketService interface {
-	// CreateTicket handles the use case for submitting a new ticket.
 	CreateTicket(ctx context.Context, params CreateTicketParams) (*domain.Ticket, error)
-
-	// GetTicket handles retrieving a specific ticket.
-	// The viewerID is included so the service can enforce authorization rules
-	// (e.g., ensuring the viewer is the requester, assignee, or an admin).
 	GetTicket(ctx context.Context, ticketID int64, viewerID uuid.UUID) (*domain.Ticket, error)
-
-	// UpdateStatus handles the use case for changing a ticket's state.
 	UpdateStatus(ctx context.Context, params UpdateStatusParams) (*domain.Ticket, error)
-
-	// AssignTicket handles the use case for assigning a ticket to an agent.
 	AssignTicket(ctx context.Context, params AssignTicketParams) (*domain.Ticket, error)
-
-	// ListTickets handles retrieving a list of tickets.
-	// The viewerID is included so the service can scope the results based on the user's role
-	// (e.g., customers see only their own tickets, agents see their assigned tickets).
 	ListTickets(ctx context.Context, params ListTicketsParams) ([]*domain.Ticket, error)
 }
 

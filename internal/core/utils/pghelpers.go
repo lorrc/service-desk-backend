@@ -1,7 +1,6 @@
 package utils
 
 import (
-	// Ensure this import path matches the pgx version you are using (e.g., v5)
 	"github.com/jackc/pgx/v5/pgtype"
 )
 

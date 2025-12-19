@@ -4,8 +4,10 @@ package domain
 type EventType string
 
 const (
-	EventCommentAdded  EventType = "COMMENT_ADDED"
-	EventStatusUpdated EventType = "STATUS_UPDATED"
+	EventCommentAdded   EventType = "COMMENT_ADDED"
+	EventStatusUpdated  EventType = "STATUS_UPDATED"
+	EventTicketCreated  EventType = "TICKET_CREATED"
+	EventTicketAssigned EventType = "TICKET_ASSIGNED"
 )
 
 // Event is the payload sent over WebSocket.

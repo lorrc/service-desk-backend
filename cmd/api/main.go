@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -11,40 +11,96 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
+
 	httpAdapter "github.com/lorrc/service-desk-backend/internal/adapters/primary/http"
-	httpMiddleware "github.com/lorrc/service-desk-backend/internal/adapters/primary/http/middleware"
-	"github.com/lorrc/service-desk-backend/internal/adapters/primary/websocket" // <-- New import
+	mw "github.com/lorrc/service-desk-backend/internal/adapters/primary/http/middleware"
+	"github.com/lorrc/service-desk-backend/internal/adapters/primary/websocket"
 	"github.com/lorrc/service-desk-backend/internal/adapters/secondary/email"
 	"github.com/lorrc/service-desk-backend/internal/adapters/secondary/postgres"
 	"github.com/lorrc/service-desk-backend/internal/auth"
 	"github.com/lorrc/service-desk-backend/internal/config"
 	"github.com/lorrc/service-desk-backend/internal/core/services"
+	"github.com/lorrc/service-desk-backend/internal/infrastructure/logging"
 )
 
 func main() {
-	ctx := context.Background()
-
 	// 1. Load Configuration
-	cfg := config.Load()
-
-	// 2. Initialize Database Pool
-	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("Unable to connect to database: %v\n", err)
+		slog.Error("failed to load configuration", "error", err)
+		os.Exit(1)
+	}
+
+	// 2. Initialize Structured Logger
+	logger := logging.NewLogger(logging.Config{
+		Level:       cfg.Logging.Level,
+		Format:      cfg.Logging.Format,
+		Output:      os.Stdout,
+		ServiceName: cfg.App.Name,
+		Environment: cfg.App.Environment,
+	})
+
+	logger.Info("starting service",
+		"version", cfg.App.Version,
+		"environment", cfg.App.Environment,
+	)
+
+	// 3. Initialize Database Pool
+	ctx := context.Background()
+	poolConfig, err := pgxpool.ParseConfig(cfg.Database.URL)
+	if err != nil {
+		logger.Error("failed to parse database URL", "error", err)
+		os.Exit(1)
+	}
+
+	// Apply database configuration
+	poolConfig.MaxConns = int32(cfg.Database.MaxOpenConns)
+	poolConfig.MinConns = int32(cfg.Database.MaxIdleConns)
+	poolConfig.MaxConnLifetime = cfg.Database.ConnMaxLifetime
+	poolConfig.MaxConnIdleTime = cfg.Database.ConnMaxIdleTime
+
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
+	if err != nil {
+		logger.Error("failed to connect to database", "error", err)
+		os.Exit(1)
 	}
 	defer pool.Close()
+
 	if err := pool.Ping(ctx); err != nil {
-		log.Fatalf("Database ping failed: %v\n", err)
+		logger.Error("database ping failed", "error", err)
+		os.Exit(1)
+	}
+	logger.Info("database connection established")
+
+	// 4. Initialize Security & Real-time Components
+	tokenManager := auth.NewTokenManager(cfg.JWT.Secret)
+	hub := websocket.NewHub(logger)
+	go hub.Run()
+
+	// 5. Initialize Rate Limiters
+	var generalRateLimiter, authRateLimiter *mw.RateLimiter
+	if cfg.RateLimit.Enabled {
+		generalRateLimiter = mw.NewRateLimiter(mw.RateLimiterConfig{
+			RequestsPerSecond: cfg.RateLimit.RequestsPerSecond,
+			BurstSize:         cfg.RateLimit.BurstSize,
+			CleanupInterval:   time.Minute,
+			TTL:               3 * time.Minute,
+		})
+
+		authRateLimiter = mw.NewRateLimiter(mw.RateLimiterConfig{
+			RequestsPerSecond: cfg.RateLimit.AuthRPS,
+			BurstSize:         cfg.RateLimit.AuthBurst,
+			CleanupInterval:   time.Minute,
+			TTL:               5 * time.Minute,
+		})
 	}
 
-	// 3. Initialize Security & Real-time Components
-	tokenManager := auth.NewTokenManager(cfg.JWTSecret)
-	hub := websocket.NewHub() // <-- New WebSocket Hub
-	go hub.Run()              // <-- Run the hub in the background
+	// 6. Dependency Injection (Wiring the Hexagon)
 
-	// 4. Dependency Injection (Wiring the Hexagon)
+	// Error Handler
+	errorHandler := httpAdapter.NewErrorHandler(logger)
+
 	// Repositories (Secondary Adapters)
 	userRepo := postgres.NewUserRepository(pool)
 	ticketRepo := postgres.NewTicketRepository(pool)
@@ -57,57 +113,88 @@ func main() {
 	// Services (Core)
 	authService := services.NewAuthService(userRepo)
 	authzService := services.NewAuthorizationService(authzRepo)
-	ticketService := services.NewTicketService(ticketRepo, authzService, notifier, hub)                   // <-- Injected hub
-	commentService := services.NewCommentService(commentRepo, ticketService, authzService, notifier, hub) // <-- Injected hub
+	ticketService := services.NewTicketService(ticketRepo, authzService, notifier, hub)
+	commentService := services.NewCommentService(commentRepo, ticketService, authzService, notifier, hub)
 
 	// Handlers (Primary Adapters)
-	authHandler := httpAdapter.NewAuthHandler(authService, tokenManager)
-	commentHandler := httpAdapter.NewCommentHandler(commentService)
-	ticketHandler := httpAdapter.NewTicketHandler(ticketService, commentHandler)
-	wsHandler := httpAdapter.NewWebSocketHandler(hub, tokenManager) // <-- New WebSocket Handler
+	authHandler := httpAdapter.NewAuthHandler(authService, tokenManager, errorHandler, logger)
+	commentHandler := httpAdapter.NewCommentHandler(commentService, errorHandler, logger)
+	ticketHandler := httpAdapter.NewTicketHandler(ticketService, commentHandler, errorHandler, logger)
+	wsHandler := httpAdapter.NewWebSocketHandler(hub, tokenManager, cfg, logger)
+	healthHandler := httpAdapter.NewHealthHandler(pool, cfg.App.Version)
 
-	// 5. Setup Router
+	// 7. Setup Router
 	r := chi.NewRouter()
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
 
+	// Global middleware
+	r.Use(mw.RequestID)
+	r.Use(mw.RequestLogger(logger))
+	r.Use(mw.RecoveryLogger(logger))
+
+	// Apply general rate limiting if enabled
+	if generalRateLimiter != nil {
+		r.Use(generalRateLimiter.Middleware)
+	}
+
+	// Health check endpoints (outside /api/v1 for standard probe paths)
+	r.Get("/health", healthHandler.HandleHealth)
+	r.Get("/health/live", healthHandler.HandleLiveness)
+	r.Get("/health/ready", healthHandler.HandleReadiness)
+
+	// API routes
 	r.Route("/api/v1", func(r chi.Router) {
-		// Public routes for authentication
-		r.Route("/auth", authHandler.RegisterRoutes)
+		// Public auth routes with stricter rate limiting
+		r.Group(func(r chi.Router) {
+			if authRateLimiter != nil {
+				r.Use(authRateLimiter.Middleware)
+			}
+			r.Route("/auth", authHandler.RegisterRoutes)
+		})
 
 		// WebSocket route (Authentication is handled inside the handler)
 		r.Get("/ws", wsHandler.ServeHTTP)
 
-		// Protected REST routes for tickets
+		// Protected REST routes
 		r.Group(func(r chi.Router) {
-			r.Use(httpMiddleware.JWTMiddleware(tokenManager))
+			r.Use(mw.JWTMiddleware(tokenManager))
 			r.Route("/tickets", ticketHandler.RegisterRoutes)
 		})
 	})
 
-	// 6. Start Server with Graceful Shutdown
+	// 8. Start Server with Graceful Shutdown
 	srv := &http.Server{
-		Addr:    cfg.ServerPort,
-		Handler: r,
+		Addr:         cfg.Server.Port,
+		Handler:      r,
+		ReadTimeout:  cfg.Server.ReadTimeout,
+		WriteTimeout: cfg.Server.WriteTimeout,
+		IdleTimeout:  cfg.Server.IdleTimeout,
 	}
 
+	// Start server in goroutine
 	go func() {
-		log.Printf("Server starting on %s", cfg.ServerPort)
+		logger.Info("server starting", "port", cfg.Server.Port)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("ListenAndServe(): %v", err)
+			logger.Error("server error", "error", err)
+			os.Exit(1)
 		}
 	}()
 
+	// Wait for interrupt signal
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-	log.Println("Shutting down server...")
+	sig := <-quit
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	logger.Info("shutdown signal received", "signal", sig.String())
+
+	// Create shutdown context with timeout
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
 	defer cancel()
 
+	// Graceful shutdown
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Fatalf("Server Shutdown Failed:%+v", err)
+		logger.Error("server shutdown error", "error", err)
+		os.Exit(1)
 	}
-	log.Println("Server exited properly")
+
+	logger.Info("server shutdown complete")
 }

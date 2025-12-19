@@ -2,7 +2,7 @@ package email
 
 import (
 	"context"
-	"log"
+	"log/slog"
 
 	"github.com/lorrc/service-desk-backend/internal/core/ports"
 )
@@ -11,6 +11,7 @@ import (
 // It implements the ports.Notifier interface.
 type MockSMTPNotifier struct {
 	userRepo ports.UserRepository
+	logger   *slog.Logger
 }
 
 // NewMockSMTPNotifier creates a new mock notifier.
@@ -18,6 +19,15 @@ type MockSMTPNotifier struct {
 func NewMockSMTPNotifier(userRepo ports.UserRepository) ports.Notifier {
 	return &MockSMTPNotifier{
 		userRepo: userRepo,
+		logger:   slog.Default().With("component", "email_notifier"),
+	}
+}
+
+// NewMockSMTPNotifierWithLogger creates a new mock notifier with a custom logger.
+func NewMockSMTPNotifierWithLogger(userRepo ports.UserRepository, logger *slog.Logger) ports.Notifier {
+	return &MockSMTPNotifier{
+		userRepo: userRepo,
+		logger:   logger.With("component", "email_notifier"),
 	}
 }
 
@@ -30,15 +40,18 @@ func (n *MockSMTPNotifier) Notify(ctx context.Context, params ports.Notification
 	// 1. Get the recipient's details
 	user, err := n.userRepo.GetByID(notifyCtx, params.RecipientUserID)
 	if err != nil {
-		log.Printf("ERROR: [Notifier] Failed to get user %s for notification: %v", params.RecipientUserID, err)
+		n.logger.Error("failed to get user for notification",
+			"user_id", params.RecipientUserID,
+			"error", err,
+		)
 		return
 	}
 
 	// 2. Log the mock email
-	log.Println("--- MOCK EMAIL ---")
-	log.Printf("TO: %s <%s>", user.FullName, user.Email)
-	log.Printf("SUBJECT: %s", params.Subject)
-	log.Printf("BODY: %s", params.Message)
-	log.Printf("Ticket ID: %d", params.TicketID)
-	log.Println("--- END MOCK EMAIL ---")
+	n.logger.Info("mock email sent",
+		"to_name", user.FullName,
+		"to_email", user.Email,
+		"subject", params.Subject,
+		"ticket_id", params.TicketID,
+	)
 }

@@ -1,29 +1,43 @@
 package http
 
 import (
-	"encoding/json"
-	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	mw "github.com/lorrc/service-desk-backend/internal/adapters/primary/http/middleware"
+	"github.com/lorrc/service-desk-backend/internal/adapters/primary/validation"
 	"github.com/lorrc/service-desk-backend/internal/auth"
 	"github.com/lorrc/service-desk-backend/internal/core/domain"
 	"github.com/lorrc/service-desk-backend/internal/core/ports"
 )
 
+const (
+	maxTicketsPerPage = 100
+)
+
+// TicketHandler handles HTTP requests for tickets
 type TicketHandler struct {
 	ticketService  ports.TicketService
-	commentHandler *CommentHandler // Inject CommentHandler
+	commentHandler *CommentHandler
+	errorHandler   *ErrorHandler
+	logger         *slog.Logger
 }
 
-// NewTicketHandler now accepts a CommentHandler.
-func NewTicketHandler(ticketService ports.TicketService, commentHandler *CommentHandler) *TicketHandler {
+// NewTicketHandler creates a new ticket handler
+func NewTicketHandler(
+	ticketService ports.TicketService,
+	commentHandler *CommentHandler,
+	errorHandler *ErrorHandler,
+	logger *slog.Logger,
+) *TicketHandler {
 	return &TicketHandler{
 		ticketService:  ticketService,
 		commentHandler: commentHandler,
+		errorHandler:   errorHandler,
+		logger:         logger.With("handler", "ticket"),
 	}
 }
 
@@ -46,73 +60,124 @@ func (h *TicketHandler) RegisterRoutes(r chi.Router) {
 		r.Patch("/assignee", h.HandleAssignTicket)
 
 		// Mount the comment routes nested under /tickets/{ticketID}
-		r.Mount("/comments", h.commentHandler.Router())
+		if h.commentHandler != nil {
+			r.Mount("/comments", h.commentHandler.Router())
+		}
 	})
 }
 
 // --- Request/Response DTOs ---
 
+// CreateTicketRequest defines the expected JSON body for creating a ticket
 type CreateTicketRequest struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	Priority    string `json:"priority"`
 }
 
+// Validate validates the create ticket request
+func (r *CreateTicketRequest) Validate() error {
+	v := validation.NewValidator()
+
+	v.Required("title", r.Title).
+		MaxLength("title", r.Title, domain.MaxTitleLength)
+
+	v.MaxLength("description", r.Description, domain.MaxDescriptionLength)
+
+	v.Required("priority", r.Priority).
+		OneOf("priority", r.Priority, []string{"LOW", "MEDIUM", "HIGH"})
+
+	if v.HasErrors() {
+		return v.Errors()
+	}
+	return nil
+}
+
+// UpdateStatusRequest defines the expected JSON body for status updates
 type UpdateStatusRequest struct {
 	Status string `json:"status"`
 }
 
+// Validate validates the update status request
+func (r *UpdateStatusRequest) Validate() error {
+	v := validation.NewValidator()
+
+	v.Required("status", r.Status).
+		OneOf("status", r.Status, []string{"OPEN", "IN_PROGRESS", "CLOSED"})
+
+	if v.HasErrors() {
+		return v.Errors()
+	}
+	return nil
+}
+
+// AssignTicketRequest defines the expected JSON body for assigning a ticket
 type AssignTicketRequest struct {
 	AssigneeID string `json:"assigneeId"`
 }
 
+// Validate validates the assign ticket request
+func (r *AssignTicketRequest) Validate() error {
+	v := validation.NewValidator()
+
+	v.Required("assigneeId", r.AssigneeID).
+		UUID("assigneeId", r.AssigneeID)
+
+	if v.HasErrors() {
+		return v.Errors()
+	}
+	return nil
+}
+
 // --- Handlers ---
 
+// HandleListTickets handles GET /tickets
 func (h *TicketHandler) HandleListTickets(w http.ResponseWriter, r *http.Request) {
-	claims, ok := r.Context().Value(mw.UserClaimsKey).(*auth.Claims)
+	claims, ok := h.getClaims(w, r)
 	if !ok {
-		WriteJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "Not authorized"})
 		return
 	}
 
-	// Parse pagination and filter query parameters
-	limit := getIntQueryParam(r, "limit", 25)
-	offset := getIntQueryParam(r, "offset", 0)
-	status := getStringQueryParam(r, "status")
-	priority := getStringQueryParam(r, "priority")
+	// Parse pagination
+	pagination := validation.ParsePagination(r, maxTicketsPerPage)
 
-	// Enforce a max limit to prevent abuse
-	if limit > 100 {
-		limit = 100
-	}
+	// Parse optional filters
+	status := validation.ParseStringQueryParam(r, "status")
+	priority := validation.ParseStringQueryParam(r, "priority")
 
 	params := ports.ListTicketsParams{
 		ViewerID: claims.UserID,
-		Limit:    limit,
-		Offset:   offset,
+		Limit:    pagination.Limit,
+		Offset:   pagination.Offset,
 		Status:   status,
 		Priority: priority,
 	}
 
 	tickets, err := h.ticketService.ListTickets(r.Context(), params)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to retrieve tickets"})
+		h.errorHandler.Handle(w, r, err)
 		return
 	}
 
-	WriteJSON(w, http.StatusOK, tickets)
+	// Use simple pagination (without total count for performance)
+	WritePaginatedSimple(w, tickets, pagination.Limit, pagination.Offset)
 }
 
+// HandleCreateTicket handles POST /tickets
 func (h *TicketHandler) HandleCreateTicket(w http.ResponseWriter, r *http.Request) {
-	claims, ok := r.Context().Value(mw.UserClaimsKey).(*auth.Claims)
+	claims, ok := h.getClaims(w, r)
 	if !ok {
-		WriteJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "Not authorized"})
 		return
 	}
 
-	var req CreateTicketRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Invalid request body"})
+	req, err := validation.DecodeAndValidate[CreateTicketRequest](r)
+	if err != nil {
+		h.errorHandler.Handle(w, r, err)
+		return
+	}
+
+	if err := req.Validate(); err != nil {
+		h.errorHandler.Handle(w, r, err)
 		return
 	}
 
@@ -125,58 +190,61 @@ func (h *TicketHandler) HandleCreateTicket(w http.ResponseWriter, r *http.Reques
 
 	ticket, err := h.ticketService.CreateTicket(r.Context(), params)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to create ticket"})
+		h.errorHandler.Handle(w, r, err)
 		return
 	}
 
-	WriteJSON(w, http.StatusCreated, ticket)
+	h.logger.Info("ticket created",
+		"ticket_id", ticket.ID,
+		"user_id", claims.UserID,
+	)
+
+	WriteCreated(w, ticket)
 }
 
+// HandleGetTicket handles GET /tickets/{ticketID}
 func (h *TicketHandler) HandleGetTicket(w http.ResponseWriter, r *http.Request) {
-	claims, ok := r.Context().Value(mw.UserClaimsKey).(*auth.Claims)
+	claims, ok := h.getClaims(w, r)
 	if !ok {
-		WriteJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "Not authorized"})
 		return
 	}
 
-	ticketIDStr := chi.URLParam(r, "ticketID")
-	ticketID, err := strconv.ParseInt(ticketIDStr, 10, 64)
+	ticketID, err := h.parseTicketID(r)
 	if err != nil {
-		WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Invalid ticket ID"})
+		h.errorHandler.Handle(w, r, err)
 		return
 	}
 
 	ticket, err := h.ticketService.GetTicket(r.Context(), ticketID, claims.UserID)
 	if err != nil {
-		if errors.Is(err, ports.ErrTicketNotFound) {
-			WriteJSON(w, http.StatusNotFound, ErrorResponse{Error: "Ticket not found"})
-		} else if errors.Is(err, ports.ErrForbidden) {
-			WriteJSON(w, http.StatusForbidden, ErrorResponse{Error: "Access denied"})
-		} else {
-			WriteJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "An unexpected error occurred"})
-		}
+		h.errorHandler.Handle(w, r, err)
 		return
 	}
 
 	WriteJSON(w, http.StatusOK, ticket)
 }
 
+// HandleUpdateTicketStatus handles PATCH /tickets/{ticketID}/status
 func (h *TicketHandler) HandleUpdateTicketStatus(w http.ResponseWriter, r *http.Request) {
-	claims, ok := r.Context().Value(mw.UserClaimsKey).(*auth.Claims)
+	claims, ok := h.getClaims(w, r)
 	if !ok {
-		WriteJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "Not authorized"})
 		return
 	}
 
-	ticketID, err := strconv.ParseInt(chi.URLParam(r, "ticketID"), 10, 64)
+	ticketID, err := h.parseTicketID(r)
 	if err != nil {
-		WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Invalid ticket ID"})
+		h.errorHandler.Handle(w, r, err)
 		return
 	}
 
-	var req UpdateStatusRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Invalid request body"})
+	req, err := validation.DecodeAndValidate[UpdateStatusRequest](r)
+	if err != nil {
+		h.errorHandler.Handle(w, r, err)
+		return
+	}
+
+	if err := req.Validate(); err != nil {
+		h.errorHandler.Handle(w, r, err)
 		return
 	}
 
@@ -188,41 +256,47 @@ func (h *TicketHandler) HandleUpdateTicketStatus(w http.ResponseWriter, r *http.
 
 	ticket, err := h.ticketService.UpdateStatus(r.Context(), params)
 	if err != nil {
-		if errors.Is(err, ports.ErrTicketNotFound) {
-			WriteJSON(w, http.StatusNotFound, ErrorResponse{Error: "Ticket not found"})
-		} else if errors.Is(err, domain.ErrInvalidStatusTransition) {
-			WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
-		} else {
-			WriteJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to update ticket status"})
-		}
+		h.errorHandler.Handle(w, r, err)
 		return
 	}
+
+	h.logger.Info("ticket status updated",
+		"ticket_id", ticketID,
+		"new_status", req.Status,
+		"user_id", claims.UserID,
+	)
 
 	WriteJSON(w, http.StatusOK, ticket)
 }
 
+// HandleAssignTicket handles PATCH /tickets/{ticketID}/assignee
 func (h *TicketHandler) HandleAssignTicket(w http.ResponseWriter, r *http.Request) {
-	claims, ok := r.Context().Value(mw.UserClaimsKey).(*auth.Claims)
+	claims, ok := h.getClaims(w, r)
 	if !ok {
-		WriteJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "Not authorized"})
 		return
 	}
 
-	ticketID, err := strconv.ParseInt(chi.URLParam(r, "ticketID"), 10, 64)
+	ticketID, err := h.parseTicketID(r)
 	if err != nil {
-		WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Invalid ticket ID"})
+		h.errorHandler.Handle(w, r, err)
 		return
 	}
 
-	var req AssignTicketRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Invalid request body"})
+	req, err := validation.DecodeAndValidate[AssignTicketRequest](r)
+	if err != nil {
+		h.errorHandler.Handle(w, r, err)
+		return
+	}
+
+	if err := req.Validate(); err != nil {
+		h.errorHandler.Handle(w, r, err)
 		return
 	}
 
 	assigneeID, err := uuid.Parse(req.AssigneeID)
 	if err != nil {
-		WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Invalid assignee ID format"})
+		// This shouldn't happen since we validated the UUID format
+		h.errorHandler.Handle(w, r, err)
 		return
 	}
 
@@ -234,38 +308,42 @@ func (h *TicketHandler) HandleAssignTicket(w http.ResponseWriter, r *http.Reques
 
 	ticket, err := h.ticketService.AssignTicket(r.Context(), params)
 	if err != nil {
-		if errors.Is(err, ports.ErrTicketNotFound) {
-			WriteJSON(w, http.StatusNotFound, ErrorResponse{Error: "Ticket not found"})
-		} else {
-			WriteJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to assign ticket"})
-		}
+		h.errorHandler.Handle(w, r, err)
 		return
 	}
+
+	h.logger.Info("ticket assigned",
+		"ticket_id", ticketID,
+		"assignee_id", assigneeID,
+		"user_id", claims.UserID,
+	)
 
 	WriteJSON(w, http.StatusOK, ticket)
 }
 
-// getIntQueryParam safely parses an integer query parameter or returns a default value.
-func getIntQueryParam(r *http.Request, key string, defaultValue int) int {
-	valStr := r.URL.Query().Get(key)
-	if valStr == "" {
-		return defaultValue
+// --- Helper methods ---
+
+// getClaims extracts and validates user claims from the request context
+func (h *TicketHandler) getClaims(w http.ResponseWriter, r *http.Request) (*auth.Claims, bool) {
+	claims, ok := mw.GetClaims(r.Context())
+	if !ok {
+		WriteJSON(w, http.StatusUnauthorized, ErrorResponse{
+			Error: "Not authorized",
+			Code:  "UNAUTHORIZED",
+		})
+		return nil, false
 	}
-	valInt, err := strconv.Atoi(valStr)
-	if err != nil {
-		return defaultValue
-	}
-	if valInt < 0 {
-		return defaultValue
-	}
-	return valInt
+	return claims, true
 }
 
-// getStringQueryParam safely parses a string query parameter, returning nil if it's empty.
-func getStringQueryParam(r *http.Request, key string) *string {
-	valStr := r.URL.Query().Get(key)
-	if valStr == "" {
-		return nil
+// parseTicketID extracts and validates the ticket ID from the URL
+func (h *TicketHandler) parseTicketID(r *http.Request) (int64, error) {
+	ticketIDStr := chi.URLParam(r, "ticketID")
+	ticketID, err := strconv.ParseInt(ticketIDStr, 10, 64)
+	if err != nil || ticketID <= 0 {
+		v := validation.NewValidator()
+		v.Custom("ticketID", false, "Invalid ticket ID")
+		return 0, v.Errors()
 	}
-	return &valStr
+	return ticketID, nil
 }

@@ -9,154 +9,225 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/lorrc/service-desk-backend/internal/adapters/secondary/postgres/db"
 	"github.com/lorrc/service-desk-backend/internal/core/domain"
+	apperrors "github.com/lorrc/service-desk-backend/internal/core/errors"
 	"github.com/lorrc/service-desk-backend/internal/core/ports"
-	"github.com/lorrc/service-desk-backend/internal/core/utils" // <-- Import utils
+	"github.com/lorrc/service-desk-backend/internal/core/utils"
 )
 
-// TicketRepository is the secondary adapter for ticket persistence.
+// TicketRepository is the postgres adapter for ticket persistence.
 type TicketRepository struct {
-	q db.Querier
+	pool *pgxpool.Pool
 }
 
-// Ensure TicketRepository implements the ports.TicketRepository interface.
 var _ ports.TicketRepository = (*TicketRepository)(nil)
 
 // NewTicketRepository creates a new ticket repository.
 func NewTicketRepository(pool *pgxpool.Pool) ports.TicketRepository {
-	return &TicketRepository{
-		q: db.New(pool),
-	}
+	return &TicketRepository{pool: pool}
 }
 
-// mapDBTicketToDomain converts a database ticket model to a core domain model.
-func mapDBTicketToDomain(dbTicket db.Ticket) *domain.Ticket {
-	domainTicket := &domain.Ticket{
-		ID:        dbTicket.ID,
-		Title:     dbTicket.Title,
-		Status:    domain.TicketStatus(dbTicket.Status),
-		Priority:  domain.TicketPriority(dbTicket.Priority),
-		CreatedAt: dbTicket.CreatedAt.Time,
-		// ** FIX for Line 43 **
-		// Use helper to convert pgtype.Text -> string
-		Description: utils.FromString(dbTicket.Description),
-	}
-
-	if dbTicket.RequesterID.Valid {
-		domainTicket.RequesterID = dbTicket.RequesterID.Bytes
-	}
-	if dbTicket.AssigneeID.Valid {
-		assigneeUUID := uuid.UUID(dbTicket.AssigneeID.Bytes)
-		domainTicket.AssigneeID = &assigneeUUID
-	}
-	if dbTicket.UpdatedAt.Valid {
-		domainTicket.UpdatedAt = &dbTicket.UpdatedAt.Time
-	}
-
-	return domainTicket
-}
-
-// Create persists a new ticket entity.
+// Create persists a new ticket to the database.
 func (r *TicketRepository) Create(ctx context.Context, ticket *domain.Ticket) (*domain.Ticket, error) {
-	params := db.CreateTicketParams{
-		Title:    ticket.Title,
-		Priority: string(ticket.Priority),
-		// ** FIX for Create **
-		// Use helper to convert string -> pgtype.Text
-		Description: utils.ToString(ticket.Description),
-		RequesterID: pgtype.UUID{Bytes: ticket.RequesterID, Valid: true},
-	}
-	createdTicket, err := r.q.CreateTicket(ctx, params)
-	if err != nil {
-		return nil, err
-	}
-	return mapDBTicketToDomain(createdTicket), nil
+	query := `
+		INSERT INTO tickets (title, description, status, priority, requester_id, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, title, description, status, priority, requester_id, assignee_id, created_at, updated_at
+	`
+
+	return r.scanTicket(r.pool.QueryRow(ctx, query,
+		ticket.Title,
+		ticket.Description,
+		string(ticket.Status),
+		string(ticket.Priority),
+		pgtype.UUID{Bytes: ticket.RequesterID, Valid: true},
+		ticket.CreatedAt,
+	))
 }
 
-// GetByID retrieves a single ticket by its ID.
+// GetByID retrieves a ticket by its ID.
 func (r *TicketRepository) GetByID(ctx context.Context, id int64) (*domain.Ticket, error) {
-	dbTicket, err := r.q.GetTicketByID(ctx, id)
+	query := `
+		SELECT id, title, description, status, priority, requester_id, assignee_id, created_at, updated_at
+		FROM tickets WHERE id = $1
+	`
+
+	ticket, err := r.scanTicket(r.pool.QueryRow(ctx, query, id))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ports.ErrTicketNotFound
+			return nil, apperrors.ErrTicketNotFound
 		}
 		return nil, err
 	}
-	return mapDBTicketToDomain(dbTicket), nil
+	return ticket, nil
 }
 
-// Update persists changes to an existing ticket entity.
+// Update persists changes to an existing ticket.
 func (r *TicketRepository) Update(ctx context.Context, ticket *domain.Ticket) (*domain.Ticket, error) {
-	params := db.UpdateTicketParams{
-		ID:     ticket.ID,
-		Status: string(ticket.Status),
-		AssigneeID: pgtype.UUID{
-			Bytes: [16]byte{},
-			Valid: ticket.AssigneeID != nil,
-		},
-		UpdatedAt: pgtype.Timestamptz{
-			Time:  time.Time{},
-			Valid: ticket.UpdatedAt != nil,
-		},
-	}
+	query := `
+		UPDATE tickets
+		SET status = $2, assignee_id = $3, updated_at = $4
+		WHERE id = $1
+		RETURNING id, title, description, status, priority, requester_id, assignee_id, created_at, updated_at
+	`
 
+	var assigneeID pgtype.UUID
 	if ticket.AssigneeID != nil {
-		params.AssigneeID.Bytes = *ticket.AssigneeID
+		assigneeID = pgtype.UUID{Bytes: *ticket.AssigneeID, Valid: true}
 	}
+
+	var updatedAt pgtype.Timestamptz
 	if ticket.UpdatedAt != nil {
-		params.UpdatedAt.Time = *ticket.UpdatedAt
+		updatedAt = pgtype.Timestamptz{Time: *ticket.UpdatedAt, Valid: true}
+	} else {
+		updatedAt = pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
 	}
 
-	updatedTicket, err := r.q.UpdateTicket(ctx, params)
-	if err != nil {
-		return nil, err
-	}
-	return mapDBTicketToDomain(updatedTicket), nil
+	return r.scanTicket(r.pool.QueryRow(ctx, query,
+		ticket.ID,
+		string(ticket.Status),
+		assigneeID,
+		updatedAt,
+	))
 }
 
-// mapDBTicketListToDomain is a helper to map slices
-func mapDBTicketListToDomain(dbTickets []db.Ticket) []*domain.Ticket {
-	domainTickets := make([]*domain.Ticket, len(dbTickets))
-	for i, dbTicket := range dbTickets {
-		domainTickets[i] = mapDBTicketToDomain(dbTicket)
-	}
-	return domainTickets
-}
-
-// ListPaginated retrieves all tickets with pagination and optional filters.
+// ListPaginated retrieves all tickets with pagination and filters.
 func (r *TicketRepository) ListPaginated(ctx context.Context, params ports.ListTicketsRepoParams) ([]*domain.Ticket, error) {
-	// The dbParams fields (pgtype.Text) now correctly match the ports.ListTicketsRepoParams fields
-	dbParams := db.ListTicketsPaginatedParams{
-		Limit:    params.Limit,
-		Offset:   params.Offset,
-		Status:   params.Status,
-		Priority: params.Priority,
+	query := `
+		SELECT id, title, description, status, priority, requester_id, assignee_id, created_at, updated_at
+		FROM tickets
+		WHERE ($1::text IS NULL OR status = $1)
+		  AND ($2::text IS NULL OR priority = $2)
+		ORDER BY created_at DESC
+		LIMIT $3 OFFSET $4
+	`
+
+	var status, priority *string
+	if params.Status.Valid {
+		status = &params.Status.String
+	}
+	if params.Priority.Valid {
+		priority = &params.Priority.String
 	}
 
-	dbTickets, err := r.q.ListTicketsPaginated(ctx, dbParams)
+	rows, err := r.pool.Query(ctx, query, status, priority, params.Limit, params.Offset)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 
-	return mapDBTicketListToDomain(dbTickets), nil
+	return r.scanTickets(rows)
 }
 
-// ListByRequesterPaginated retrieves tickets for a specific user with pagination and optional filters.
+// ListByRequesterPaginated retrieves tickets for a specific requester with pagination.
 func (r *TicketRepository) ListByRequesterPaginated(ctx context.Context, params ports.ListTicketsRepoParams) ([]*domain.Ticket, error) {
-	// The dbParams fields (pgtype.Text) now correctly match the ports.ListTicketsRepoParams fields
-	dbParams := db.ListTicketsByRequesterPaginatedParams{
-		RequesterID: params.RequesterID,
-		Limit:       params.Limit,
-		Offset:      params.Offset,
-		Status:      params.Status,
-		Priority:    params.Priority,
+	query := `
+		SELECT id, title, description, status, priority, requester_id, assignee_id, created_at, updated_at
+		FROM tickets
+		WHERE requester_id = $1
+		  AND ($2::text IS NULL OR status = $2)
+		  AND ($3::text IS NULL OR priority = $3)
+		ORDER BY created_at DESC
+		LIMIT $4 OFFSET $5
+	`
+
+	var status, priority *string
+	if params.Status.Valid {
+		status = &params.Status.String
+	}
+	if params.Priority.Valid {
+		priority = &params.Priority.String
 	}
 
-	dbTickets, err := r.q.ListTicketsByRequesterPaginated(ctx, dbParams)
+	rows, err := r.pool.Query(ctx, query, params.RequesterID, status, priority, params.Limit, params.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return r.scanTickets(rows)
+}
+
+// scanTicket scans a single ticket row.
+func (r *TicketRepository) scanTicket(row pgx.Row) (*domain.Ticket, error) {
+	var ticket domain.Ticket
+	var requesterID, assigneeID pgtype.UUID
+	var description pgtype.Text
+	var updatedAt pgtype.Timestamptz
+	var status, priority string
+
+	err := row.Scan(
+		&ticket.ID,
+		&ticket.Title,
+		&description,
+		&status,
+		&priority,
+		&requesterID,
+		&assigneeID,
+		&ticket.CreatedAt,
+		&updatedAt,
+	)
 	if err != nil {
 		return nil, err
 	}
 
-	return mapDBTicketListToDomain(dbTickets), nil
+	ticket.Description = utils.FromString(description)
+	ticket.Status = domain.TicketStatus(status)
+	ticket.Priority = domain.TicketPriority(priority)
+	ticket.RequesterID = requesterID.Bytes
+
+	if assigneeID.Valid {
+		id := uuid.UUID(assigneeID.Bytes)
+		ticket.AssigneeID = &id
+	}
+	if updatedAt.Valid {
+		ticket.UpdatedAt = &updatedAt.Time
+	}
+
+	return &ticket, nil
+}
+
+// scanTickets scans multiple ticket rows.
+func (r *TicketRepository) scanTickets(rows pgx.Rows) ([]*domain.Ticket, error) {
+	var tickets []*domain.Ticket
+
+	for rows.Next() {
+		var ticket domain.Ticket
+		var requesterID, assigneeID pgtype.UUID
+		var description pgtype.Text
+		var updatedAt pgtype.Timestamptz
+		var status, priority string
+
+		err := rows.Scan(
+			&ticket.ID,
+			&ticket.Title,
+			&description,
+			&status,
+			&priority,
+			&requesterID,
+			&assigneeID,
+			&ticket.CreatedAt,
+			&updatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		ticket.Description = utils.FromString(description)
+		ticket.Status = domain.TicketStatus(status)
+		ticket.Priority = domain.TicketPriority(priority)
+		ticket.RequesterID = requesterID.Bytes
+
+		if assigneeID.Valid {
+			id := uuid.UUID(assigneeID.Bytes)
+			ticket.AssigneeID = &id
+		}
+		if updatedAt.Valid {
+			ticket.UpdatedAt = &updatedAt.Time
+		}
+
+		tickets = append(tickets, &ticket)
+	}
+
+	return tickets, rows.Err()
 }
