@@ -77,6 +77,7 @@ type TicketService interface {
 	UpdateStatus(ctx context.Context, params UpdateStatusParams) (*domain.Ticket, error)
 	AssignTicket(ctx context.Context, params AssignTicketParams) (*domain.Ticket, error)
 	ListTickets(ctx context.Context, params ListTicketsParams) ([]*domain.Ticket, error)
+	Shutdown()
 }
 
 // CommentService defines the port for comment-related business logic.

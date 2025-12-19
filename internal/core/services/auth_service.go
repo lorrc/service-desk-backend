@@ -26,14 +26,6 @@ func NewAuthService(userRepo ports.UserRepository, defaultOrgID uuid.UUID) ports
 	}
 }
 
-// NewAuthServiceWithOrg creates an auth service with a specific default org
-func NewAuthServiceWithOrg(userRepo ports.UserRepository, defaultOrgID uuid.UUID) ports.AuthService {
-	return &AuthService{
-		userRepo:     userRepo,
-		defaultOrgID: defaultOrgID,
-	}
-}
-
 // Register creates a new user account with validated credentials
 func (s *AuthService) Register(ctx context.Context, fullName, email, password string, orgID uuid.UUID) (*domain.User, error) {
 	// Validate registration parameters

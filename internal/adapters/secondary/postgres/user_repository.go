@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/lorrc/service-desk-backend/internal/adapters/secondary/postgres/db"
@@ -51,6 +52,11 @@ func (r *UserRepository) Create(ctx context.Context, user *domain.User) (*domain
 
 	createdUser, err := r.q.CreateUser(ctx, params)
 	if err != nil {
+		// FIX: Check for Postgres Unique Violation (Code "23505")
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return nil, apperrors.ErrUserExists
+		}
 		return nil, err
 	}
 

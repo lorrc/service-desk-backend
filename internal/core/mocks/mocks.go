@@ -196,6 +196,10 @@ func (m *MockTicketService) ListTickets(ctx context.Context, params ports.ListTi
 	return args.Get(0).([]*domain.Ticket), args.Error(1)
 }
 
+func (m *MockTicketService) Shutdown() {
+	m.Called()
+}
+
 // MockNotifier is a mock implementation of ports.Notifier
 type MockNotifier struct {
 	mock.Mock

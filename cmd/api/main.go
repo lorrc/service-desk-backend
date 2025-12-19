@@ -202,6 +202,7 @@ func main() {
 		logger.Error("server shutdown error", "error", err)
 		os.Exit(1)
 	}
-
+	logger.Info("waiting for background tasks to finish...")
+	ticketService.Shutdown()
 	logger.Info("server shutdown complete")
 }
