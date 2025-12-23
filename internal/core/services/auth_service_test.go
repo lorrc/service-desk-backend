@@ -120,10 +120,10 @@ func TestAuthService_Login(t *testing.T) {
 		hash, _ := domain.HashPassword("Password123")
 
 		existingUser := &domain.User{
-			ID:           uuid.New(),
-			Email:        "user@example.com",
-			FullName:     "Test User",
-			PasswordHash: hash,
+			ID:             uuid.New(),
+			Email:          "user@example.com",
+			FullName:       "Test User",
+			HashedPassword: hash,
 		}
 
 		mockUserRepo.On("GetByEmail", ctx, "user@example.com").
@@ -157,9 +157,9 @@ func TestAuthService_Login(t *testing.T) {
 		hash, _ := domain.HashPassword("Password123")
 
 		existingUser := &domain.User{
-			ID:           uuid.New(),
-			Email:        "user@example.com",
-			PasswordHash: hash,
+			ID:             uuid.New(),
+			Email:          "user@example.com",
+			HashedPassword: hash,
 		}
 
 		mockUserRepo.On("GetByEmail", ctx, "user@example.com").

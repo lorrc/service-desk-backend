@@ -1,17 +1,66 @@
 version: '3.8'
 services:
   app:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "8080:8080"
+    env_file:
+      - .env
     environment:
-      # Use the service name 'db' as the hostname to connect to the database container
-      DATABASE_URL: postgres://servicedesk_user:local_password@db:5432/servicedesk_db?sslmode=disable
-      JWT_SECRET: "a_very_secure_secret_for_local_development"
+      # Database configuration
+      DATABASE_URL: postgres://servicedesk_user:${DB_PASSWORD:-local_password}@db:5432/servicedesk_db?sslmode=disable
+      DB_MAX_OPEN_CONNS: 25
+      DB_MAX_IDLE_CONNS: 5
+      DB_CONN_MAX_LIFETIME: 5m
+      DB_CONN_MAX_IDLE_TIME: 5m
+
+      # JWT configuration - OVERRIDE IN PRODUCTION
+      JWT_SECRET: ${JWT_SECRET:-local_dev_secret_change_me_in_production}
+      JWT_ACCESS_TOKEN_TTL: 1h
+      JWT_REFRESH_TOKEN_TTL: 168h
+
+      # Server configuration
       SERVER_PORT: ":8080"
+      SERVER_READ_TIMEOUT: 15s
+      SERVER_WRITE_TIMEOUT: 15s
+      SERVER_IDLE_TIMEOUT: 60s
+      SERVER_SHUTDOWN_TIMEOUT: 30s
+
+      # Rate limiting
+      RATE_LIMIT_ENABLED: "true"
+      RATE_LIMIT_RPS: 10
+      RATE_LIMIT_BURST: 20
+      RATE_LIMIT_AUTH_RPS: 1
+      RATE_LIMIT_AUTH_BURST: 5
+
+      # WebSocket - Set origins in production
+      WS_ALLOWED_ORIGINS: ${WS_ALLOWED_ORIGINS:-}
+      WS_READ_BUFFER_SIZE: 1024
+      WS_WRITE_BUFFER_SIZE: 1024
+
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: json
+
+      # Application metadata
+      APP_NAME: service-desk
+      APP_VERSION: ${APP_VERSION:-dev}
+      APP_ENV: ${APP_ENV:-development}
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     restart: on-failure
+    healthcheck:
+      test: [ "CMD", "wget", "-q", "--spider", "http://localhost:8080/health/live" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - service-desk-network
+
   db:
     image: postgres:16-alpine
     restart: always
@@ -20,9 +69,21 @@ services:
       POSTGRES_PASSWORD: local_password
       POSTGRES_DB: servicedesk_db
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U servicedesk_user -d servicedesk_db" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - service-desk-network
 
 volumes:
   db_data:
+
+networks:
+  service-desk-network:
+    driver: bridge

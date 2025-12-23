@@ -44,7 +44,7 @@ type User struct {
 	OrganizationID uuid.UUID
 	FullName       string
 	Email          string
-	PasswordHash   string
+	HashedPassword string
 	CreatedAt      time.Time
 }
 
@@ -151,7 +151,7 @@ func isValidEmail(email string) bool {
 
 // CheckPassword verifies if the provided password matches the stored hash
 func (u *User) CheckPassword(password string) bool {
-	err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password))
+	err := bcrypt.CompareHashAndPassword([]byte(u.HashedPassword), []byte(password))
 	return err == nil
 }
 
@@ -185,7 +185,7 @@ func NewUser(params UserRegistrationParams, orgID uuid.UUID) (*User, error) {
 		OrganizationID: orgID,
 		FullName:       params.FullName,
 		Email:          params.Email,
-		PasswordHash:   hashedPassword,
+		HashedPassword: hashedPassword,
 		CreatedAt:      time.Now().UTC(),
 	}, nil
 }

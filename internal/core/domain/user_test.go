@@ -82,8 +82,8 @@ func TestUser_CheckPassword(t *testing.T) {
 	require.NoError(t, err)
 
 	user := &domain.User{
-		ID:           uuid.New(),
-		PasswordHash: hash,
+		ID:             uuid.New(),
+		HashedPassword: hash,
 	}
 
 	t.Run("correct password", func(t *testing.T) {
@@ -216,8 +216,8 @@ func TestNewUser(t *testing.T) {
 		assert.Equal(t, orgID, user.OrganizationID)
 		assert.Equal(t, params.FullName, user.FullName)
 		assert.Equal(t, params.Email, user.Email)
-		assert.NotEmpty(t, user.PasswordHash)
-		assert.NotEqual(t, params.Password, user.PasswordHash)
+		assert.NotEmpty(t, user.HashedPassword)
+		assert.NotEqual(t, params.Password, user.HashedPassword)
 		assert.False(t, user.CreatedAt.IsZero())
 	})
 

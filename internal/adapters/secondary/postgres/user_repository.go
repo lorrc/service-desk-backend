@@ -36,7 +36,7 @@ func mapDBUserToDomain(dbUser db.User) *domain.User {
 		OrganizationID: dbUser.OrganizationID.Bytes,
 		FullName:       dbUser.FullName,
 		Email:          dbUser.Email,
-		PasswordHash:   dbUser.HashedPassword,
+		HashedPassword: dbUser.HashedPassword,
 		CreatedAt:      dbUser.CreatedAt.Time,
 	}
 }
@@ -47,7 +47,7 @@ func (r *UserRepository) Create(ctx context.Context, user *domain.User) (*domain
 		OrganizationID: pgtype.UUID{Bytes: user.OrganizationID, Valid: true},
 		FullName:       user.FullName,
 		Email:          user.Email,
-		HashedPassword: user.PasswordHash,
+		HashedPassword: user.HashedPassword,
 	}
 
 	createdUser, err := r.q.CreateUser(ctx, params)

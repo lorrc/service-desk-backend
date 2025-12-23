@@ -32,7 +32,7 @@ func TestUserRepository_CreateGet(t *testing.T) {
 		ID:             uuid.New(),
 		FullName:       "Test User",
 		Email:          "test.user@example.com",
-		PasswordHash:   "hashedpassword",
+		HashedPassword: "hashedpassword",
 		OrganizationID: orgID,
 	}
 

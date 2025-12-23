@@ -19,7 +19,7 @@ func createTestUser(t *testing.T, ctx context.Context, userRepo ports.UserReposi
 		ID:             uuid.New(),
 		FullName:       "Ticket Requester",
 		Email:          uuid.NewString() + "@example.com", // Ensure unique email
-		PasswordHash:   "testpassword",
+		HashedPassword: "testpassword",
 		OrganizationID: uuid.New(),
 	}
 	createdUser, err := userRepo.Create(ctx, user)
