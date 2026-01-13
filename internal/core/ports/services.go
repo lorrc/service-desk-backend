@@ -9,7 +9,7 @@ import (
 
 // AuthService defines the port for authentication business logic.
 type AuthService interface {
-	Register(ctx context.Context, fullName, email, password string, orgID uuid.UUID) (*domain.User, error)
+	Register(ctx context.Context, fullName, email, password, role string, orgID uuid.UUID) (*domain.User, error)
 	Login(ctx context.Context, email, password string) (*domain.User, error)
 }
 

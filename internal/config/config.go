@@ -34,6 +34,9 @@ type Config struct {
 
 	// Application metadata
 	App AppConfig
+
+	// Admin user configuration
+	Admin AdminConfig
 }
 
 // ServerConfig holds HTTP server configuration
@@ -93,6 +96,14 @@ type AppConfig struct {
 	DefaultOrgID string
 }
 
+// AdminConfig holds the initial admin user configuration
+type AdminConfig struct {
+	Email     string
+	Password  string
+	FirstName string
+	LastName  string
+}
+
 // Load loads configuration from environment variables
 func Load() (*Config, error) {
 	// Load .env file if it exists (for local development)
@@ -144,6 +155,12 @@ func Load() (*Config, error) {
 			Environment:  getEnvOrDefault("APP_ENV", "development"),
 			DefaultOrgID: getEnvOrDefault("DEFAULT_ORG_ID", "00000000-0000-0000-0000-000000000001"),
 		},
+		Admin: AdminConfig{
+			Email:     getEnvOrDefault("ADMIN_EMAIL", ""),
+			Password:  getEnvOrDefault("ADMIN_PASSWORD", ""),
+			FirstName: getEnvOrDefault("ADMIN_FIRST_NAME", ""),
+			LastName:  getEnvOrDefault("ADMIN_LAST_NAME", ""),
+		},
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -164,6 +181,10 @@ func (c *Config) Validate() error {
 
 	if c.JWT.Secret == "" {
 		errs = append(errs, "JWT_SECRET is required")
+	}
+
+	if c.Admin.Email != "" && c.Admin.Password == "" {
+		errs = append(errs, "ADMIN_PASSWORD is required if ADMIN_EMAIL is set")
 	}
 
 	// Security validations

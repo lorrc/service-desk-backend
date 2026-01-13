@@ -27,6 +27,7 @@ type TicketRepository interface {
 // AuthorizationRepository defines the port for RBAC data access.
 type AuthorizationRepository interface {
 	GetUserPermissions(ctx context.Context, userID uuid.UUID) ([]string, error)
+	AssignRole(ctx context.Context, userID uuid.UUID, roleName string) error
 }
 
 // CommentRepository defines the port for comment persistence.

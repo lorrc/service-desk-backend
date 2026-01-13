@@ -9,6 +9,8 @@ import (
 )
 
 // UserClaimsKey is the key used to store user claims in the request context.
+type contextKey string
+
 const UserClaimsKey contextKey = "userClaims"
 
 // JWTMiddleware validates the JWT token from the Authorization header.

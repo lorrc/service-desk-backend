@@ -12,7 +12,7 @@ import (
 )
 
 const getUserPermissions = `-- name: GetUserPermissions :many
-SELECT DISTINCT p.name
+SELECT DISTINCT p.code
 FROM permissions p
 INNER JOIN role_permissions rp ON p.id = rp.permission_id
 INNER JOIN user_roles ur ON rp.role_id = ur.role_id
@@ -27,11 +27,11 @@ func (q *Queries) GetUserPermissions(ctx context.Context, userID pgtype.UUID) ([
 	defer rows.Close()
 	var items []string
 	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
+		var code string
+		if err := rows.Scan(&code); err != nil {
 			return nil, err
 		}
-		items = append(items, name)
+		items = append(items, code)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

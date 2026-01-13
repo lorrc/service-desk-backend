@@ -24,7 +24,7 @@ type Organization struct {
 
 type Permission struct {
 	ID   int32  `json:"id"`
-	Name string `json:"name"`
+	Code string `json:"code"`
 }
 
 type Role struct {

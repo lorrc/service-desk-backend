@@ -153,7 +153,7 @@ func (h *AuthHandler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Register user (domain validation happens in the service)
-	user, err := h.authService.Register(r.Context(), req.FullName, req.Email, req.Password, uuid.Nil)
+	user, err := h.authService.Register(r.Context(), req.FullName, req.Email, req.Password, "customer", uuid.Nil)
 	if err != nil {
 		h.errorHandler.Handle(w, r, err)
 		return

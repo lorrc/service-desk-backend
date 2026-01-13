@@ -70,6 +70,7 @@ func (r *TicketRepository) Create(ctx context.Context, ticket *domain.Ticket) (*
 	params := db.CreateTicketParams{
 		Title:       ticket.Title,
 		Description: utils.ToString(ticket.Description),
+		Status:      string(ticket.Status),
 		Priority:    string(ticket.Priority),
 		RequesterID: pgtype.UUID{Bytes: ticket.RequesterID, Valid: true},
 	}

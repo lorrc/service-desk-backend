@@ -11,41 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const createTicket = `-- name: CreateTicket :one
-INSERT INTO tickets (title, description, priority, requester_id)
-VALUES ($1, $2, $3, $4)
-RETURNING id, title, description, status, priority, requester_id, assignee_id, created_at, updated_at
-`
-
-type CreateTicketParams struct {
-	Title       string      `json:"title"`
-	Description pgtype.Text `json:"description"`
-	Priority    string      `json:"priority"`
-	RequesterID pgtype.UUID `json:"requester_id"`
-}
-
-func (q *Queries) CreateTicket(ctx context.Context, arg CreateTicketParams) (Ticket, error) {
-	row := q.db.QueryRow(ctx, createTicket,
-		arg.Title,
-		arg.Description,
-		arg.Priority,
-		arg.RequesterID,
-	)
-	var i Ticket
-	err := row.Scan(
-		&i.ID,
-		&i.Title,
-		&i.Description,
-		&i.Status,
-		&i.Priority,
-		&i.RequesterID,
-		&i.AssigneeID,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
 const getTicketByID = `-- name: GetTicketByID :one
 SELECT id, title, description, status, priority, requester_id, assignee_id, created_at, updated_at FROM tickets
 WHERE id = $1 LIMIT 1

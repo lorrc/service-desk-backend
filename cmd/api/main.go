@@ -24,6 +24,7 @@ import (
 	"github.com/lorrc/service-desk-backend/internal/adapters/secondary/postgres"
 	"github.com/lorrc/service-desk-backend/internal/auth"
 	"github.com/lorrc/service-desk-backend/internal/config"
+	apperrors "github.com/lorrc/service-desk-backend/internal/core/errors"
 	"github.com/lorrc/service-desk-backend/internal/core/ports" // Assuming interface exists here
 	"github.com/lorrc/service-desk-backend/internal/core/services"
 	"github.com/lorrc/service-desk-backend/internal/infrastructure/logging"
@@ -84,7 +85,7 @@ func run() error {
 	logger.Info("database connection established")
 
 	// 4. Initialize Components
-	tokenManager := auth.NewTokenManager(cfg.JWT.Secret)
+	tokenManager := auth.NewTokenManager(cfg.JWT.Secret, cfg.JWT.AccessTokenTTL)
 	hub := websocket.NewHub(logger)
 	go hub.Run()
 
@@ -128,10 +129,15 @@ func run() error {
 		notifier = email.NewMockSMTPNotifier(userRepo)
 	}
 
-	authService := services.NewAuthService(userRepo, defaultOrgID)
+	authService := services.NewAuthService(userRepo, authzRepo, defaultOrgID)
 	authzService := services.NewAuthorizationService(authzRepo)
 	ticketService := services.NewTicketService(ticketRepo, authzService, notifier, hub)
 	commentService := services.NewCommentService(commentRepo, ticketService, authzService, notifier, hub)
+
+	// Seed admin user if configured
+	if err := seedAdminUser(ctx, cfg.Admin, authService, logger); err != nil {
+		return fmt.Errorf("failed to seed admin user: %w", err)
+	}
 
 	authHandler := httpAdapter.NewAuthHandler(authService, tokenManager, errorHandler, logger)
 	commentHandler := httpAdapter.NewCommentHandler(commentService, errorHandler, logger)
@@ -218,5 +224,39 @@ func run() error {
 	// hub.Shutdown() // Recommendation: Implement shutdown for websockets
 
 	logger.Info("server shutdown complete")
+	return nil
+}
+
+// seedAdminUser creates an admin user from configuration if it doesn't already exist.
+func seedAdminUser(ctx context.Context, cfg config.AdminConfig, authService ports.AuthService, logger *slog.Logger) error {
+	// If no admin email is configured, do nothing.
+	if cfg.Email == "" {
+		logger.Info("admin user seeding not configured")
+		return nil
+	}
+
+	logger.Info("attempting to seed admin user", "email", cfg.Email)
+
+	// A simple way to check for existence is to try to log in.
+	// This avoids needing a GetUserByEmail method on the auth service.
+	_, err := authService.Login(ctx, cfg.Email, cfg.Password)
+	if err == nil {
+		logger.Info("admin user already exists", "email", cfg.Email)
+		return nil // User already exists
+	}
+
+	// If the error is anything other than invalid credentials, it's a real problem.
+	if !errors.Is(err, apperrors.ErrInvalidCredentials) && !errors.Is(err, apperrors.ErrUserNotFound) {
+		return fmt.Errorf("failed during admin existence check: %w", err)
+	}
+
+	// User does not exist, so create them.
+	fullName := fmt.Sprintf("%s %s", cfg.FirstName, cfg.LastName)
+	_, err = authService.Register(ctx, fullName, cfg.Email, cfg.Password, "admin", uuid.Nil)
+	if err != nil {
+		return fmt.Errorf("failed to register admin user: %w", err)
+	}
+
+	logger.Info("successfully seeded admin user", "email", cfg.Email)
 	return nil
 }

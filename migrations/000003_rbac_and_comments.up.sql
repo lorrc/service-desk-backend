@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS roles (
 
 CREATE TABLE IF NOT EXISTS permissions (
     id SERIAL PRIMARY KEY,
-    name TEXT UNIQUE NOT NULL
+    code TEXT UNIQUE NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS role_permissions (
@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS comments (
 );
 
 -- Seed basic roles and permissions
-INSERT INTO permissions (name) VALUES 
+INSERT INTO permissions (code) VALUES
     ('tickets:create'), 
     ('tickets:read'), 
     ('tickets:read:all'), 

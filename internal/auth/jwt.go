@@ -17,15 +17,24 @@ type Claims struct {
 
 type TokenManager struct {
 	secretKey []byte
+	accessTTL time.Duration
 }
 
-func NewTokenManager(secret string) *TokenManager {
-	return &TokenManager{secretKey: []byte(secret)}
+func NewTokenManager(secret string, accessTTL time.Duration) *TokenManager {
+	return &TokenManager{
+		secretKey: []byte(secret),
+		accessTTL: accessTTL,
+	}
 }
 
 // GenerateToken creates a new JWT access token
 func (tm *TokenManager) GenerateToken(userID, orgID uuid.UUID) (string, error) {
-	expirationTime := time.Now().Add(1 * time.Hour) // 1 hour expiration
+	ttl := tm.accessTTL
+	if ttl <= 0 {
+		ttl = time.Hour
+	}
+
+	expirationTime := time.Now().Add(ttl)
 	claims := &Claims{
 		UserID: userID,
 		OrgID:  orgID,

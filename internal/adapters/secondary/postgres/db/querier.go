@@ -12,7 +12,6 @@ import (
 
 type Querier interface {
 	CreateComment(ctx context.Context, arg CreateCommentParams) (Comment, error)
-	CreateTicket(ctx context.Context, arg CreateTicketParams) (Ticket, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	GetTicketByID(ctx context.Context, id int64) (Ticket, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
