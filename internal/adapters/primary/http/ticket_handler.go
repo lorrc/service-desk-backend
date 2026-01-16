@@ -147,7 +147,7 @@ func (h *TicketHandler) HandleListTickets(w http.ResponseWriter, r *http.Request
 
 	params := ports.ListTicketsParams{
 		ViewerID: claims.UserID,
-		Limit:    pagination.Limit,
+		Limit:    pagination.Limit + 1,
 		Offset:   pagination.Offset,
 		Status:   status,
 		Priority: priority,

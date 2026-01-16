@@ -8,10 +8,12 @@ import (
 // Domain errors - these represent business rule violations
 var (
 	// ErrInvalidCredentials Authentication & Authorization
-	ErrInvalidCredentials = errors.New("invalid credentials")
-	ErrUserExists         = errors.New("user already exists")
-	ErrForbidden          = errors.New("action forbidden")
-	ErrUnauthorized       = errors.New("unauthorized")
+	ErrInvalidCredentials  = errors.New("invalid credentials")
+	ErrUserExists          = errors.New("user already exists")
+	ErrForbidden           = errors.New("action forbidden")
+	ErrUnauthorized        = errors.New("unauthorized")
+	ErrRoleNotFound        = errors.New("role not found")
+	ErrRoleAlreadyAssigned = errors.New("role already assigned")
 
 	// ErrUserNotFound User validation
 	ErrUserNotFound     = errors.New("user not found")

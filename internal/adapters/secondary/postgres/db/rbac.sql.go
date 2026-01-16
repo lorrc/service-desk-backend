@@ -11,6 +11,36 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const assignRole = `-- name: AssignRole :one
+WITH role AS (
+    SELECT id FROM roles WHERE name = $1
+),
+ins AS (
+    INSERT INTO user_roles (user_id, role_id)
+    SELECT $2, id FROM role
+    ON CONFLICT DO NOTHING
+    RETURNING role_id
+)
+SELECT
+    CASE
+        WHEN NOT EXISTS (SELECT 1 FROM role) THEN 'role_not_found'
+        WHEN EXISTS (SELECT 1 FROM ins) THEN 'assigned'
+        ELSE 'already_assigned'
+    END AS status
+`
+
+type AssignRoleParams struct {
+	RoleName string      `json:"role_name"`
+	UserID   pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) AssignRole(ctx context.Context, arg AssignRoleParams) (string, error) {
+	row := q.db.QueryRow(ctx, assignRole, arg.RoleName, arg.UserID)
+	var status string
+	err := row.Scan(&status)
+	return status, err
+}
+
 const getUserPermissions = `-- name: GetUserPermissions :many
 SELECT DISTINCT p.code
 FROM permissions p

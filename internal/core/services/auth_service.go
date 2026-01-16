@@ -62,22 +62,30 @@ func (s *AuthService) Register(ctx context.Context, fullName, email, password, r
 		targetOrgID = s.defaultOrgID
 	}
 
-	// 4. Create user domain object
+	// 4. Determine if this is the first user
+	userCount, err := s.userRepo.CountUsers(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// 5. Create user domain object
 	user, err := domain.NewUser(params, targetOrgID)
 	if err != nil {
 		return nil, err
 	}
 
-	// 5. Persist the user
+	// 6. Persist the user
 	createdUser, err := s.userRepo.Create(ctx, user)
 	if err != nil {
 		return nil, err
 	}
 
-	// 6. Assign Role
-	// If no role is specified, default to "customer"
+	// 7. Assign Role
+	// First user is auto-promoted to admin.
 	assignRole := "customer"
-	if role != "" {
+	if userCount == 0 {
+		assignRole = "admin"
+	} else if role != "" {
 		assignRole = role
 	}
 

@@ -13,6 +13,7 @@ type UserRepository interface {
 	Create(ctx context.Context, user *domain.User) (*domain.User, error)
 	GetByEmail(ctx context.Context, email string) (*domain.User, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error)
+	CountUsers(ctx context.Context) (int64, error)
 }
 
 // TicketRepository defines the port for ticket persistence.

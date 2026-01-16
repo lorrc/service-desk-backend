@@ -42,6 +42,11 @@ func (m *MockUserRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain
 	return args.Get(0).(*domain.User), args.Error(1)
 }
 
+func (m *MockUserRepository) CountUsers(ctx context.Context) (int64, error) {
+	args := m.Called(ctx)
+	return args.Get(0).(int64), args.Error(1)
+}
+
 // MockTicketRepository is a mock implementation of ports.TicketRepository
 type MockTicketRepository struct {
 	mock.Mock
@@ -106,6 +111,11 @@ func (m *MockAuthorizationRepository) GetUserPermissions(ctx context.Context, us
 		return nil, args.Error(1)
 	}
 	return args.Get(0).([]string), args.Error(1)
+}
+
+func (m *MockAuthorizationRepository) AssignRole(ctx context.Context, userID uuid.UUID, roleName string) error {
+	args := m.Called(ctx, userID, roleName)
+	return args.Error(0)
 }
 
 // MockCommentRepository is a mock implementation of ports.CommentRepository

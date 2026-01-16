@@ -2,11 +2,13 @@ package postgres
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/lorrc/service-desk-backend/internal/adapters/secondary/postgres/db"
+	apperrors "github.com/lorrc/service-desk-backend/internal/core/errors"
 	"github.com/lorrc/service-desk-backend/internal/core/ports"
 )
 
@@ -33,4 +35,27 @@ func (r *AuthorizationRepository) GetUserPermissions(ctx context.Context, userID
 		return nil, err
 	}
 	return permissions, nil
+}
+
+// AssignRole assigns a role to a user by role name.
+func (r *AuthorizationRepository) AssignRole(ctx context.Context, userID uuid.UUID, roleName string) error {
+	params := db.AssignRoleParams{
+		UserID:   pgtype.UUID{Bytes: userID, Valid: true},
+		RoleName: roleName,
+	}
+
+	status, err := r.q.AssignRole(ctx, params)
+	if err != nil {
+		return err
+	}
+	switch status {
+	case "assigned":
+		return nil
+	case "already_assigned":
+		return apperrors.ErrRoleAlreadyAssigned
+	case "role_not_found":
+		return apperrors.ErrRoleNotFound
+	default:
+		return fmt.Errorf("unexpected role assignment status: %s", status)
+	}
 }

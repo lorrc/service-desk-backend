@@ -86,3 +86,8 @@ func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Use
 	}
 	return mapDBUserToDomain(dbUser), nil
 }
+
+// CountUsers returns the total number of users.
+func (r *UserRepository) CountUsers(ctx context.Context) (int64, error) {
+	return r.q.CountUsers(ctx)
+}
