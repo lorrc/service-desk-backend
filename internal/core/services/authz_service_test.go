@@ -33,6 +33,10 @@ func (f *fakeAuthRepo) SetUserRole(_ context.Context, _ uuid.UUID, _ string) err
 	return nil
 }
 
+func (f *fakeAuthRepo) EnsureRBACDefaults(_ context.Context) error {
+	return nil
+}
+
 func TestAuthorizationService_GetPermissions_AssignsDefaultRoleWhenMissing(t *testing.T) {
 	repo := &fakeAuthRepo{
 		permissions:      []string{},
