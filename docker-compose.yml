@@ -35,11 +35,6 @@ services:
       RATE_LIMIT_AUTH_RPS: 1
       RATE_LIMIT_AUTH_BURST: 5
 
-      # WebSocket - Set origins in production
-      WS_ALLOWED_ORIGINS: ${WS_ALLOWED_ORIGINS:-}
-      WS_READ_BUFFER_SIZE: 1024
-      WS_WRITE_BUFFER_SIZE: 1024
-
       # Logging
       LOG_LEVEL: ${LOG_LEVEL:-info}
       LOG_FORMAT: json

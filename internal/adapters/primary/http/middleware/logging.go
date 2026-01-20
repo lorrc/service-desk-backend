@@ -38,7 +38,7 @@ func (rw *responseWriter) Flush() {
 	}
 }
 
-// Hijack implements http.Hijacker for websocket upgrades.
+// Hijack implements http.Hijacker when supported by the underlying writer.
 func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	hijacker, ok := rw.ResponseWriter.(http.Hijacker)
 	if !ok {

@@ -19,7 +19,6 @@ import (
 
 	httpAdapter "github.com/lorrc/service-desk-backend/internal/adapters/primary/http"
 	mw "github.com/lorrc/service-desk-backend/internal/adapters/primary/http/middleware"
-	"github.com/lorrc/service-desk-backend/internal/adapters/primary/websocket"
 	"github.com/lorrc/service-desk-backend/internal/adapters/secondary/email"
 	"github.com/lorrc/service-desk-backend/internal/adapters/secondary/postgres"
 	"github.com/lorrc/service-desk-backend/internal/auth"
@@ -86,8 +85,7 @@ func run() error {
 
 	// 4. Initialize Components
 	tokenManager := auth.NewTokenManager(cfg.JWT.Secret, cfg.JWT.AccessTokenTTL)
-	hub := websocket.NewHub(logger)
-	go hub.Run()
+	txManager := postgres.NewTransactionManager(pool)
 
 	// 5. Rate Limiters
 	var generalRateLimiter, authRateLimiter *mw.RateLimiter
@@ -119,6 +117,7 @@ func run() error {
 	authzRepo := postgres.NewAuthorizationRepository(pool)
 	commentRepo := postgres.NewCommentRepository(pool)
 	analyticsRepo := postgres.NewAnalyticsRepository(pool)
+	eventRepo := postgres.NewTicketEventRepository(pool)
 	if err := authzRepo.EnsureRBACDefaults(ctx); err != nil {
 		return fmt.Errorf("ensure rbac defaults: %w", err)
 	}
@@ -136,8 +135,9 @@ func run() error {
 	authService := services.NewAuthService(userRepo, authzRepo, defaultOrgID)
 	authzService := services.NewAuthorizationService(authzRepo)
 	assigneeService := services.NewAssigneeService(userRepo, authzService)
-	ticketService := services.NewTicketService(ticketRepo, authzService, notifier, hub)
-	commentService := services.NewCommentService(commentRepo, ticketService, authzService, notifier, hub)
+	ticketService := services.NewTicketService(ticketRepo, authzService, notifier, eventRepo, txManager)
+	commentService := services.NewCommentService(commentRepo, ticketService, authzService, notifier, eventRepo, txManager)
+	eventService := services.NewEventService(eventRepo, ticketService)
 	adminService := services.NewAdminService(userRepo, authzRepo, authzService, analyticsRepo)
 
 	// Seed admin user if configured
@@ -150,8 +150,7 @@ func run() error {
 	assigneeHandler := httpAdapter.NewAssigneeHandler(assigneeService, errorHandler, logger)
 	adminHandler := httpAdapter.NewAdminHandler(adminService, errorHandler, logger)
 	commentHandler := httpAdapter.NewCommentHandler(commentService, errorHandler, logger)
-	ticketHandler := httpAdapter.NewTicketHandler(ticketService, commentHandler, errorHandler, logger)
-	wsHandler := httpAdapter.NewWebSocketHandler(hub, tokenManager, cfg, logger)
+	ticketHandler := httpAdapter.NewTicketHandler(ticketService, eventService, commentHandler, errorHandler, logger)
 	healthHandler := httpAdapter.NewHealthHandler(pool, cfg.App.Version)
 
 	// 7. Setup Router
@@ -184,8 +183,6 @@ func run() error {
 			}
 			r.Route("/auth", authHandler.RegisterRoutes)
 		})
-
-		r.Get("/ws", wsHandler.ServeHTTP)
 
 		r.Group(func(r chi.Router) {
 			r.Use(mw.JWTMiddleware(tokenManager))
@@ -231,7 +228,6 @@ func run() error {
 
 	logger.Info("waiting for background tasks to finish...")
 	ticketService.Shutdown()
-	// hub.Shutdown() // Recommendation: Implement shutdown for websockets
 
 	logger.Info("server shutdown complete")
 	return nil

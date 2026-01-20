@@ -22,7 +22,7 @@ func NewTransactionManager(pool *pgxpool.Pool) *TransactionManager {
 // WithTransaction executes a function within a database transaction.
 // If the function returns an error, the transaction is rolled back.
 // If the function succeeds, the transaction is committed.
-func (tm *TransactionManager) WithTransaction(ctx context.Context, fn func(ctx context.Context, tx pgx.Tx) error) error {
+func (tm *TransactionManager) WithTransaction(ctx context.Context, fn func(ctx context.Context) error) error {
 	tx, err := tm.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
@@ -36,7 +36,8 @@ func (tm *TransactionManager) WithTransaction(ctx context.Context, fn func(ctx c
 		}
 	}()
 
-	if err := fn(ctx, tx); err != nil {
+	txCtx := ContextWithTx(ctx, tx)
+	if err := fn(txCtx); err != nil {
 		if rbErr := tx.Rollback(ctx); rbErr != nil {
 			return fmt.Errorf("tx failed: %v, rollback failed: %w", err, rbErr)
 		}
@@ -52,7 +53,7 @@ func (tm *TransactionManager) WithTransaction(ctx context.Context, fn func(ctx c
 
 // WithReadOnlyTransaction executes a function within a read-only transaction.
 // Useful for complex queries that need consistent reads.
-func (tm *TransactionManager) WithReadOnlyTransaction(ctx context.Context, fn func(ctx context.Context, tx pgx.Tx) error) error {
+func (tm *TransactionManager) WithReadOnlyTransaction(ctx context.Context, fn func(ctx context.Context) error) error {
 	tx, err := tm.pool.BeginTx(ctx, pgx.TxOptions{
 		AccessMode: pgx.ReadOnly,
 	})
@@ -67,7 +68,8 @@ func (tm *TransactionManager) WithReadOnlyTransaction(ctx context.Context, fn fu
 		}
 	}()
 
-	if err := fn(ctx, tx); err != nil {
+	txCtx := ContextWithTx(ctx, tx)
+	if err := fn(txCtx); err != nil {
 		_ = tx.Rollback(ctx)
 		return err
 	}

@@ -15,6 +15,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type stubTransactionManager struct{}
+
+func (stubTransactionManager) WithTransaction(ctx context.Context, fn func(context.Context) error) error {
+	return fn(ctx)
+}
+
 func TestTicketService_CreateTicket(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.New()
@@ -23,9 +29,10 @@ func TestTicketService_CreateTicket(t *testing.T) {
 		mockRepo := mocks.NewMockTicketRepository()
 		mockAuthz := mocks.NewMockAuthorizationService()
 		mockNotifier := mocks.NewMockNotifier()
-		mockBroadcaster := mocks.NewMockEventBroadcaster()
+		mockEventRepo := mocks.NewMockTicketEventRepository()
+		txManager := stubTransactionManager{}
 
-		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockBroadcaster)
+		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockEventRepo, txManager)
 
 		// Setup expectations
 		mockAuthz.On("Can", ctx, userID, "tickets:create").Return(true, nil)
@@ -38,6 +45,8 @@ func TestTicketService_CreateTicket(t *testing.T) {
 				Status:      domain.StatusOpen,
 				RequesterID: userID,
 			}, nil)
+		mockEventRepo.On("Create", ctx, mock.AnythingOfType("*domain.Event")).
+			Return(&domain.Event{ID: 1}, nil)
 
 		params := ports.CreateTicketParams{
 			Title:       "Test Ticket",
@@ -56,15 +65,17 @@ func TestTicketService_CreateTicket(t *testing.T) {
 
 		mockAuthz.AssertExpectations(t)
 		mockRepo.AssertExpectations(t)
+		mockEventRepo.AssertExpectations(t)
 	})
 
 	t.Run("forbidden when no permission", func(t *testing.T) {
 		mockRepo := mocks.NewMockTicketRepository()
 		mockAuthz := mocks.NewMockAuthorizationService()
 		mockNotifier := mocks.NewMockNotifier()
-		mockBroadcaster := mocks.NewMockEventBroadcaster()
+		mockEventRepo := mocks.NewMockTicketEventRepository()
+		txManager := stubTransactionManager{}
 
-		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockBroadcaster)
+		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockEventRepo, txManager)
 
 		mockAuthz.On("Can", ctx, userID, "tickets:create").Return(false, nil)
 
@@ -86,9 +97,10 @@ func TestTicketService_CreateTicket(t *testing.T) {
 		mockRepo := mocks.NewMockTicketRepository()
 		mockAuthz := mocks.NewMockAuthorizationService()
 		mockNotifier := mocks.NewMockNotifier()
-		mockBroadcaster := mocks.NewMockEventBroadcaster()
+		mockEventRepo := mocks.NewMockTicketEventRepository()
+		txManager := stubTransactionManager{}
 
-		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockBroadcaster)
+		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockEventRepo, txManager)
 
 		mockAuthz.On("Can", ctx, userID, "tickets:create").Return(true, nil)
 
@@ -116,9 +128,10 @@ func TestTicketService_GetTicket(t *testing.T) {
 		mockRepo := mocks.NewMockTicketRepository()
 		mockAuthz := mocks.NewMockAuthorizationService()
 		mockNotifier := mocks.NewMockNotifier()
-		mockBroadcaster := mocks.NewMockEventBroadcaster()
+		mockEventRepo := mocks.NewMockTicketEventRepository()
+		txManager := stubTransactionManager{}
 
-		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockBroadcaster)
+		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockEventRepo, txManager)
 
 		expectedTicket := &domain.Ticket{
 			ID:          ticketID,
@@ -140,9 +153,10 @@ func TestTicketService_GetTicket(t *testing.T) {
 		mockRepo := mocks.NewMockTicketRepository()
 		mockAuthz := mocks.NewMockAuthorizationService()
 		mockNotifier := mocks.NewMockNotifier()
-		mockBroadcaster := mocks.NewMockEventBroadcaster()
+		mockEventRepo := mocks.NewMockTicketEventRepository()
+		txManager := stubTransactionManager{}
 
-		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockBroadcaster)
+		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockEventRepo, txManager)
 
 		otherUserID := uuid.New()
 		expectedTicket := &domain.Ticket{
@@ -166,9 +180,10 @@ func TestTicketService_GetTicket(t *testing.T) {
 		mockRepo := mocks.NewMockTicketRepository()
 		mockAuthz := mocks.NewMockAuthorizationService()
 		mockNotifier := mocks.NewMockNotifier()
-		mockBroadcaster := mocks.NewMockEventBroadcaster()
+		mockEventRepo := mocks.NewMockTicketEventRepository()
+		txManager := stubTransactionManager{}
 
-		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockBroadcaster)
+		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockEventRepo, txManager)
 
 		otherUserID := uuid.New()
 		expectedTicket := &domain.Ticket{
@@ -192,9 +207,10 @@ func TestTicketService_GetTicket(t *testing.T) {
 		mockRepo := mocks.NewMockTicketRepository()
 		mockAuthz := mocks.NewMockAuthorizationService()
 		mockNotifier := mocks.NewMockNotifier()
-		mockBroadcaster := mocks.NewMockEventBroadcaster()
+		mockEventRepo := mocks.NewMockTicketEventRepository()
+		txManager := stubTransactionManager{}
 
-		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockBroadcaster)
+		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockEventRepo, txManager)
 
 		mockAuthz.On("Can", ctx, userID, "tickets:read").Return(true, nil)
 		mockRepo.On("GetByID", ctx, ticketID).Return(nil, apperrors.ErrTicketNotFound)
@@ -215,9 +231,10 @@ func TestTicketService_UpdateStatus(t *testing.T) {
 		mockRepo := mocks.NewMockTicketRepository()
 		mockAuthz := mocks.NewMockAuthorizationService()
 		mockNotifier := mocks.NewMockNotifier()
-		mockBroadcaster := mocks.NewMockEventBroadcaster()
+		mockEventRepo := mocks.NewMockTicketEventRepository()
+		txManager := stubTransactionManager{}
 
-		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockBroadcaster)
+		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockEventRepo, txManager)
 
 		existingTicket := &domain.Ticket{
 			ID:          ticketID,
@@ -235,7 +252,8 @@ func TestTicketService_UpdateStatus(t *testing.T) {
 				Status: domain.StatusInProgress,
 			}, nil)
 		mockNotifier.On("Notify", mock.Anything, mock.Anything).Return()
-		mockBroadcaster.On("Broadcast", mock.Anything).Return(nil)
+		mockEventRepo.On("Create", ctx, mock.AnythingOfType("*domain.Event")).
+			Return(&domain.Event{ID: 1}, nil)
 
 		params := ports.UpdateStatusParams{
 			TicketID: ticketID,
@@ -247,15 +265,17 @@ func TestTicketService_UpdateStatus(t *testing.T) {
 
 		require.NoError(t, err)
 		assert.Equal(t, domain.StatusInProgress, ticket.Status)
+		mockEventRepo.AssertExpectations(t)
 	})
 
 	t.Run("invalid status transition", func(t *testing.T) {
 		mockRepo := mocks.NewMockTicketRepository()
 		mockAuthz := mocks.NewMockAuthorizationService()
 		mockNotifier := mocks.NewMockNotifier()
-		mockBroadcaster := mocks.NewMockEventBroadcaster()
+		mockEventRepo := mocks.NewMockTicketEventRepository()
+		txManager := stubTransactionManager{}
 
-		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockBroadcaster)
+		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockEventRepo, txManager)
 
 		closedTicket := &domain.Ticket{
 			ID:          ticketID,
@@ -288,9 +308,10 @@ func TestTicketService_ListTickets(t *testing.T) {
 		mockRepo := mocks.NewMockTicketRepository()
 		mockAuthz := mocks.NewMockAuthorizationService()
 		mockNotifier := mocks.NewMockNotifier()
-		mockBroadcaster := mocks.NewMockEventBroadcaster()
+		mockEventRepo := mocks.NewMockTicketEventRepository()
+		txManager := stubTransactionManager{}
 
-		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockBroadcaster)
+		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockEventRepo, txManager)
 
 		expectedTickets := []*domain.Ticket{
 			{ID: 1, Title: "Ticket 1"},
@@ -316,9 +337,10 @@ func TestTicketService_ListTickets(t *testing.T) {
 		mockRepo := mocks.NewMockTicketRepository()
 		mockAuthz := mocks.NewMockAuthorizationService()
 		mockNotifier := mocks.NewMockNotifier()
-		mockBroadcaster := mocks.NewMockEventBroadcaster()
+		mockEventRepo := mocks.NewMockTicketEventRepository()
+		txManager := stubTransactionManager{}
 
-		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockBroadcaster)
+		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockEventRepo, txManager)
 
 		expectedTickets := []*domain.Ticket{
 			{ID: 1, Title: "My Ticket", RequesterID: userID},

@@ -17,7 +17,8 @@ type CommentService struct {
 	ticketSvc   ports.TicketService
 	authzSvc    ports.AuthorizationService
 	notifier    ports.Notifier
-	broadcaster ports.EventBroadcaster
+	eventRepo   ports.TicketEventRepository
+	txManager   ports.TransactionManager
 }
 
 // Ensure implementation matches the interface.
@@ -29,14 +30,16 @@ func NewCommentService(
 	ticketSvc ports.TicketService,
 	authzSvc ports.AuthorizationService,
 	notifier ports.Notifier,
-	broadcaster ports.EventBroadcaster,
+	eventRepo ports.TicketEventRepository,
+	txManager ports.TransactionManager,
 ) ports.CommentService {
 	return &CommentService{
 		commentRepo: commentRepo,
 		ticketSvc:   ticketSvc,
 		authzSvc:    authzSvc,
 		notifier:    notifier,
-		broadcaster: broadcaster,
+		eventRepo:   eventRepo,
+		txManager:   txManager,
 	}
 }
 
@@ -85,9 +88,33 @@ func (s *CommentService) CreateComment(ctx context.Context, params ports.CreateC
 		return nil, err // e.g., validation error
 	}
 
-	// 4. Persist the comment.
-	newComment, err := s.commentRepo.Create(ctx, comment)
-	if err != nil {
+	// 4. Persist the comment and event atomically.
+	var newComment *domain.Comment
+	if err := s.txManager.WithTransaction(ctx, func(txCtx context.Context) error {
+		createdComment, err := s.commentRepo.Create(txCtx, comment)
+		if err != nil {
+			return err
+		}
+
+		payload, err := marshalEventPayload(domain.NewCommentSnapshot(createdComment))
+		if err != nil {
+			return err
+		}
+
+		event := &domain.Event{
+			TicketID: createdComment.TicketID,
+			Type:     domain.EventCommentAdded,
+			Payload:  payload,
+			ActorID:  params.ActorID,
+		}
+
+		if _, err := s.eventRepo.Create(txCtx, event); err != nil {
+			return err
+		}
+
+		newComment = createdComment
+		return nil
+	}); err != nil {
 		return nil, err
 	}
 
@@ -101,16 +128,6 @@ func (s *CommentService) CreateComment(ctx context.Context, params ports.CreateC
 			TicketID:        ticket.ID,
 		})
 	}
-
-	// 6. Broadcast real-time event (asynchronously)
-	event := domain.Event{
-		Type:     domain.EventCommentAdded,
-		Payload:  newComment,
-		TicketID: newComment.TicketID,
-	}
-	go func() {
-		_ = s.broadcaster.Broadcast(event)
-	}()
 
 	return newComment, nil
 }

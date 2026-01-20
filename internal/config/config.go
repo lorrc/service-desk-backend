@@ -26,9 +26,6 @@ type Config struct {
 	// Rate limiting configuration
 	RateLimit RateLimitConfig
 
-	// WebSocket configuration
-	WebSocket WebSocketConfig
-
 	// Logging configuration
 	Logging LoggingConfig
 
@@ -71,15 +68,6 @@ type RateLimitConfig struct {
 	BurstSize         int
 	AuthRPS           float64 // Stricter limit for auth endpoints
 	AuthBurst         int
-}
-
-// WebSocketConfig holds WebSocket configuration
-type WebSocketConfig struct {
-	AllowedOrigins  []string
-	ReadBufferSize  int
-	WriteBufferSize int
-	PingInterval    time.Duration
-	PongWait        time.Duration
 }
 
 // LoggingConfig holds logging configuration
@@ -138,13 +126,6 @@ func Load() (*Config, error) {
 			AuthRPS:           getFloatOrDefault("RATE_LIMIT_AUTH_RPS", 1),
 			AuthBurst:         getIntOrDefault("RATE_LIMIT_AUTH_BURST", 5),
 		},
-		WebSocket: WebSocketConfig{
-			AllowedOrigins:  getStringSliceOrDefault("WS_ALLOWED_ORIGINS", []string{}),
-			ReadBufferSize:  getIntOrDefault("WS_READ_BUFFER_SIZE", 1024),
-			WriteBufferSize: getIntOrDefault("WS_WRITE_BUFFER_SIZE", 1024),
-			PingInterval:    getDurationOrDefault("WS_PING_INTERVAL", 54*time.Second),
-			PongWait:        getDurationOrDefault("WS_PONG_WAIT", 60*time.Second),
-		},
 		Logging: LoggingConfig{
 			Level:  getEnvOrDefault("LOG_LEVEL", "info"),
 			Format: getEnvOrDefault("LOG_FORMAT", "json"),
@@ -191,10 +172,6 @@ func (c *Config) Validate() error {
 	if c.App.Environment == "production" {
 		if len(c.JWT.Secret) < 32 {
 			errs = append(errs, "JWT_SECRET must be at least 32 characters in production")
-		}
-
-		if len(c.WebSocket.AllowedOrigins) == 0 {
-			errs = append(errs, "WS_ALLOWED_ORIGINS must be set in production")
 		}
 	}
 
@@ -260,23 +237,6 @@ func getDurationOrDefault(key string, defaultValue time.Duration) time.Duration 
 	if value := os.Getenv(key); value != "" {
 		if duration, err := time.ParseDuration(value); err == nil {
 			return duration
-		}
-	}
-	return defaultValue
-}
-
-func getStringSliceOrDefault(key string, defaultValue []string) []string {
-	if value := os.Getenv(key); value != "" {
-		parts := strings.Split(value, ",")
-		result := make([]string, 0, len(parts))
-		for _, part := range parts {
-			trimmed := strings.TrimSpace(part)
-			if trimmed != "" {
-				result = append(result, trimmed)
-			}
-		}
-		if len(result) > 0 {
-			return result
 		}
 	}
 	return defaultValue

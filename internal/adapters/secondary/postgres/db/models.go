@@ -50,6 +50,15 @@ type Ticket struct {
 	ClosedAt    pgtype.Timestamptz `json:"closed_at"`
 }
 
+type TicketEvent struct {
+	ID        int64              `json:"id"`
+	TicketID  int64              `json:"ticket_id"`
+	Type      string             `json:"type"`
+	Payload   []byte             `json:"payload"`
+	ActorID   pgtype.UUID        `json:"actor_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type User struct {
 	ID             pgtype.UUID        `json:"id"`
 	OrganizationID pgtype.UUID        `json:"organization_id"`

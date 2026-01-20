@@ -273,16 +273,41 @@ func (m *MockNotifier) Notify(ctx context.Context, params ports.NotificationPara
 	m.Called(ctx, params)
 }
 
-// MockEventBroadcaster is a mock implementation of ports.EventBroadcaster
-type MockEventBroadcaster struct {
+// MockTicketEventRepository is a mock implementation of ports.TicketEventRepository
+type MockTicketEventRepository struct {
 	mock.Mock
 }
 
-func NewMockEventBroadcaster() *MockEventBroadcaster {
-	return &MockEventBroadcaster{}
+func NewMockTicketEventRepository() *MockTicketEventRepository {
+	return &MockTicketEventRepository{}
 }
 
-func (m *MockEventBroadcaster) Broadcast(event domain.Event) error {
-	args := m.Called(event)
+func (m *MockTicketEventRepository) Create(ctx context.Context, event *domain.Event) (*domain.Event, error) {
+	args := m.Called(ctx, event)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*domain.Event), args.Error(1)
+}
+
+func (m *MockTicketEventRepository) ListByTicketID(ctx context.Context, ticketID int64, afterID int64, limit int) ([]*domain.Event, error) {
+	args := m.Called(ctx, ticketID, afterID, limit)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*domain.Event), args.Error(1)
+}
+
+// MockTransactionManager is a mock implementation of ports.TransactionManager
+type MockTransactionManager struct {
+	mock.Mock
+}
+
+func NewMockTransactionManager() *MockTransactionManager {
+	return &MockTransactionManager{}
+}
+
+func (m *MockTransactionManager) WithTransaction(ctx context.Context, fn func(ctx context.Context) error) error {
+	args := m.Called(ctx, fn)
 	return args.Error(0)
 }

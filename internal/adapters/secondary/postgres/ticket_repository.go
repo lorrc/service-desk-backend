@@ -18,7 +18,7 @@ import (
 
 // TicketRepository is the secondary adapter for ticket persistence.
 type TicketRepository struct {
-	q db.Querier
+	pool *pgxpool.Pool
 }
 
 // Ensure TicketRepository implements the ports.TicketRepository interface.
@@ -27,7 +27,7 @@ var _ ports.TicketRepository = (*TicketRepository)(nil)
 // NewTicketRepository creates a new ticket repository.
 func NewTicketRepository(pool *pgxpool.Pool) ports.TicketRepository {
 	return &TicketRepository{
-		q: db.New(pool),
+		pool: pool,
 	}
 }
 
@@ -70,6 +70,7 @@ func mapDBTicketListToDomain(dbTickets []db.Ticket) []*domain.Ticket {
 
 // Create persists a new ticket entity.
 func (r *TicketRepository) Create(ctx context.Context, ticket *domain.Ticket) (*domain.Ticket, error) {
+	q := db.New(GetDBTX(ctx, r.pool))
 	params := db.CreateTicketParams{
 		Title:       ticket.Title,
 		Description: utils.ToString(ticket.Description),
@@ -78,7 +79,7 @@ func (r *TicketRepository) Create(ctx context.Context, ticket *domain.Ticket) (*
 		RequesterID: pgtype.UUID{Bytes: ticket.RequesterID, Valid: true},
 	}
 
-	createdTicket, err := r.q.CreateTicket(ctx, params)
+	createdTicket, err := q.CreateTicket(ctx, params)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +88,8 @@ func (r *TicketRepository) Create(ctx context.Context, ticket *domain.Ticket) (*
 
 // GetByID retrieves a single ticket by its ID.
 func (r *TicketRepository) GetByID(ctx context.Context, id int64) (*domain.Ticket, error) {
-	dbTicket, err := r.q.GetTicketByID(ctx, id)
+	q := db.New(GetDBTX(ctx, r.pool))
+	dbTicket, err := q.GetTicketByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, apperrors.ErrTicketNotFound
@@ -99,6 +101,7 @@ func (r *TicketRepository) GetByID(ctx context.Context, id int64) (*domain.Ticke
 
 // Update persists changes to an existing ticket entity.
 func (r *TicketRepository) Update(ctx context.Context, ticket *domain.Ticket) (*domain.Ticket, error) {
+	q := db.New(GetDBTX(ctx, r.pool))
 	params := db.UpdateTicketParams{
 		ID:     ticket.ID,
 		Status: string(ticket.Status),
@@ -129,7 +132,7 @@ func (r *TicketRepository) Update(ctx context.Context, ticket *domain.Ticket) (*
 		params.ClosedAt.Time = *ticket.ClosedAt
 	}
 
-	updatedTicket, err := r.q.UpdateTicket(ctx, params)
+	updatedTicket, err := q.UpdateTicket(ctx, params)
 	if err != nil {
 		return nil, err
 	}
@@ -138,6 +141,7 @@ func (r *TicketRepository) Update(ctx context.Context, ticket *domain.Ticket) (*
 
 // ListPaginated retrieves all tickets with pagination and optional filters.
 func (r *TicketRepository) ListPaginated(ctx context.Context, params ports.ListTicketsRepoParams) ([]*domain.Ticket, error) {
+	q := db.New(GetDBTX(ctx, r.pool))
 	dbParams := db.ListTicketsPaginatedParams{
 		Limit:       params.Limit,
 		Offset:      params.Offset,
@@ -149,7 +153,7 @@ func (r *TicketRepository) ListPaginated(ctx context.Context, params ports.ListT
 		CreatedTo:   params.CreatedTo,
 	}
 
-	dbTickets, err := r.q.ListTicketsPaginated(ctx, dbParams)
+	dbTickets, err := q.ListTicketsPaginated(ctx, dbParams)
 	if err != nil {
 		return nil, err
 	}
@@ -159,6 +163,7 @@ func (r *TicketRepository) ListPaginated(ctx context.Context, params ports.ListT
 
 // ListByRequesterPaginated retrieves tickets for a specific user with pagination and optional filters.
 func (r *TicketRepository) ListByRequesterPaginated(ctx context.Context, params ports.ListTicketsRepoParams) ([]*domain.Ticket, error) {
+	q := db.New(GetDBTX(ctx, r.pool))
 	dbParams := db.ListTicketsByRequesterPaginatedParams{
 		RequesterID: params.RequesterID,
 		Limit:       params.Limit,
@@ -171,7 +176,7 @@ func (r *TicketRepository) ListByRequesterPaginated(ctx context.Context, params 
 		CreatedTo:   params.CreatedTo,
 	}
 
-	dbTickets, err := r.q.ListTicketsByRequesterPaginated(ctx, dbParams)
+	dbTickets, err := q.ListTicketsByRequesterPaginated(ctx, dbParams)
 	if err != nil {
 		return nil, err
 	}

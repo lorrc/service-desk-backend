@@ -1,6 +1,13 @@
 package domain
 
-// EventType defines the type of real-time event.
+import (
+	"encoding/json"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+// EventType defines the type of ticket event.
 type EventType string
 
 const (
@@ -10,9 +17,12 @@ const (
 	EventTicketAssigned EventType = "TICKET_ASSIGNED"
 )
 
-// Event is the payload sent over WebSocket.
+// Event represents a persisted ticket event.
 type Event struct {
-	Type     EventType   `json:"type"`
-	Payload  interface{} `json:"payload"`
-	TicketID int64       `json:"ticketId"` // Used for routing to specific ticket "rooms"
+	ID        int64           `json:"id"`
+	TicketID  int64           `json:"ticketId"`
+	Type      EventType       `json:"type"`
+	Payload   json.RawMessage `json:"payload"`
+	ActorID   uuid.UUID       `json:"actorId"`
+	CreatedAt time.Time       `json:"createdAt"`
 }

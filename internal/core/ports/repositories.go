@@ -50,6 +50,12 @@ type CommentRepository interface {
 	ListByTicketID(ctx context.Context, ticketID int64) ([]*domain.Comment, error)
 }
 
+// TicketEventRepository defines the port for ticket event persistence.
+type TicketEventRepository interface {
+	Create(ctx context.Context, event *domain.Event) (*domain.Event, error)
+	ListByTicketID(ctx context.Context, ticketID int64, afterID int64, limit int) ([]*domain.Event, error)
+}
+
 // ListTicketsRepoParams defines parameters for paginated ticket queries.
 type ListTicketsRepoParams struct {
 	Limit       int32

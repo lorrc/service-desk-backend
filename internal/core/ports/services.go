@@ -82,6 +82,14 @@ type ListTicketsParams struct {
 	CreatedTo   *time.Time
 }
 
+// ListTicketEventsParams defines the input for listing ticket events.
+type ListTicketEventsParams struct {
+	TicketID int64
+	ViewerID uuid.UUID
+	AfterID  int64
+	Limit    int
+}
+
 // NotificationParams defines the input for sending a notification.
 type NotificationParams struct {
 	RecipientUserID uuid.UUID
@@ -106,12 +114,17 @@ type CommentService interface {
 	GetCommentsForTicket(ctx context.Context, params GetCommentsParams) ([]*domain.Comment, error)
 }
 
+// EventService defines the port for ticket event queries.
+type EventService interface {
+	ListTicketEvents(ctx context.Context, params ListTicketEventsParams) ([]*domain.Event, error)
+}
+
 // Notifier defines the port for sending asynchronous notifications.
 type Notifier interface {
 	Notify(ctx context.Context, params NotificationParams)
 }
 
-// EventBroadcaster defines the port for broadcasting real-time events.
-type EventBroadcaster interface {
-	Broadcast(event domain.Event) error
+// TransactionManager defines the port for running atomic operations.
+type TransactionManager interface {
+	WithTransaction(ctx context.Context, fn func(ctx context.Context) error) error
 }

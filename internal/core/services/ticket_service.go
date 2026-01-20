@@ -18,7 +18,8 @@ type TicketService struct {
 	ticketRepo  ports.TicketRepository
 	authzSvc    ports.AuthorizationService
 	notifier    ports.Notifier
-	broadcaster ports.EventBroadcaster
+	eventRepo   ports.TicketEventRepository
+	txManager   ports.TransactionManager
 	wg          sync.WaitGroup
 }
 
@@ -29,13 +30,15 @@ func NewTicketService(
 	ticketRepo ports.TicketRepository,
 	authzSvc ports.AuthorizationService,
 	notifier ports.Notifier,
-	broadcaster ports.EventBroadcaster,
+	eventRepo ports.TicketEventRepository,
+	txManager ports.TransactionManager,
 ) ports.TicketService {
 	return &TicketService{
 		ticketRepo:  ticketRepo,
 		authzSvc:    authzSvc,
 		notifier:    notifier,
-		broadcaster: broadcaster,
+		eventRepo:   eventRepo,
+		txManager:   txManager,
 	}
 }
 
@@ -63,8 +66,37 @@ func (s *TicketService) CreateTicket(ctx context.Context, params ports.CreateTic
 		return nil, err // Validation errors are returned here
 	}
 
-	// 3. Persist the ticket
-	return s.ticketRepo.Create(ctx, ticket)
+	// 3. Persist the ticket and event atomically
+	var createdTicket *domain.Ticket
+	if err := s.txManager.WithTransaction(ctx, func(txCtx context.Context) error {
+		newTicket, err := s.ticketRepo.Create(txCtx, ticket)
+		if err != nil {
+			return err
+		}
+
+		payload, err := marshalEventPayload(domain.NewTicketSnapshot(newTicket))
+		if err != nil {
+			return err
+		}
+
+		event := &domain.Event{
+			TicketID: newTicket.ID,
+			Type:     domain.EventTicketCreated,
+			Payload:  payload,
+			ActorID:  params.RequesterID,
+		}
+
+		if _, err := s.eventRepo.Create(txCtx, event); err != nil {
+			return err
+		}
+
+		createdTicket = newTicket
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	return createdTicket, nil
 }
 
 // GetTicket retrieves a specific ticket with authorization
@@ -122,18 +154,39 @@ func (s *TicketService) UpdateStatus(ctx context.Context, params ports.UpdateSta
 	}
 
 	// 4. Persist changes
-	updatedTicket, err := s.ticketRepo.Update(ctx, ticket)
-	if err != nil {
+	var updatedTicket *domain.Ticket
+	if err := s.txManager.WithTransaction(ctx, func(txCtx context.Context) error {
+		savedTicket, err := s.ticketRepo.Update(txCtx, ticket)
+		if err != nil {
+			return err
+		}
+
+		payload, err := marshalEventPayload(domain.NewTicketSnapshot(savedTicket))
+		if err != nil {
+			return err
+		}
+
+		event := &domain.Event{
+			TicketID: savedTicket.ID,
+			Type:     domain.EventStatusUpdated,
+			Payload:  payload,
+			ActorID:  params.ActorID,
+		}
+
+		if _, err := s.eventRepo.Create(txCtx, event); err != nil {
+			return err
+		}
+
+		updatedTicket = savedTicket
+		return nil
+	}); err != nil {
 		return nil, err
 	}
 
 	// 5. Send notification (async, in background context)
 	if ticket.RequesterID != params.ActorID {
-		go s.notifyStatusUpdate(ticket, params.ActorID)
+		go s.notifyStatusUpdate(updatedTicket, params.ActorID)
 	}
-
-	// 6. Broadcast real-time event (async)
-	go s.broadcastStatusUpdate(updatedTicket)
 
 	return updatedTicket, nil
 }
@@ -160,8 +213,37 @@ func (s *TicketService) AssignTicket(ctx context.Context, params ports.AssignTic
 		return nil, err
 	}
 
-	// 4. Persist changes
-	return s.ticketRepo.Update(ctx, ticket)
+	// 4. Persist changes and event atomically
+	var updatedTicket *domain.Ticket
+	if err := s.txManager.WithTransaction(ctx, func(txCtx context.Context) error {
+		savedTicket, err := s.ticketRepo.Update(txCtx, ticket)
+		if err != nil {
+			return err
+		}
+
+		payload, err := marshalEventPayload(domain.NewTicketSnapshot(savedTicket))
+		if err != nil {
+			return err
+		}
+
+		event := &domain.Event{
+			TicketID: savedTicket.ID,
+			Type:     domain.EventTicketAssigned,
+			Payload:  payload,
+			ActorID:  params.ActorID,
+		}
+
+		if _, err := s.eventRepo.Create(txCtx, event); err != nil {
+			return err
+		}
+
+		updatedTicket = savedTicket
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	return updatedTicket, nil
 }
 
 // ListTickets retrieves tickets based on user permissions
@@ -234,15 +316,6 @@ func (s *TicketService) notifyStatusUpdate(ticket *domain.Ticket, actorID uuid.U
 }
 
 // broadcastStatusUpdate sends real-time event for status changes
-func (s *TicketService) broadcastStatusUpdate(ticket *domain.Ticket) {
-	event := domain.Event{
-		Type:     domain.EventStatusUpdated,
-		Payload:  ticket,
-		TicketID: ticket.ID,
-	}
-	_ = s.broadcaster.Broadcast(event)
-}
-
 func (s *TicketService) Shutdown() {
 	s.wg.Wait()
 }

@@ -17,11 +17,14 @@ import (
 
 const (
 	maxTicketsPerPage = 100
+	defaultEventsLimit = 50
+	maxEventsLimit     = 200
 )
 
 // TicketHandler handles HTTP requests for tickets
 type TicketHandler struct {
 	ticketService  ports.TicketService
+	eventService   ports.EventService
 	commentHandler *CommentHandler
 	errorHandler   *ErrorHandler
 	logger         *slog.Logger
@@ -30,12 +33,14 @@ type TicketHandler struct {
 // NewTicketHandler creates a new ticket handler
 func NewTicketHandler(
 	ticketService ports.TicketService,
+	eventService ports.EventService,
 	commentHandler *CommentHandler,
 	errorHandler *ErrorHandler,
 	logger *slog.Logger,
 ) *TicketHandler {
 	return &TicketHandler{
 		ticketService:  ticketService,
+		eventService:   eventService,
 		commentHandler: commentHandler,
 		errorHandler:   errorHandler,
 		logger:         logger.With("handler", "ticket"),
@@ -59,6 +64,7 @@ func (h *TicketHandler) RegisterRoutes(r chi.Router) {
 		r.Get("/", h.HandleGetTicket)
 		r.Patch("/status", h.HandleUpdateTicketStatus)
 		r.Patch("/assignee", h.HandleAssignTicket)
+		r.Get("/events", h.HandleListTicketEvents)
 
 		// Mount the comment routes nested under /tickets/{ticketID}
 		if h.commentHandler != nil {
@@ -431,6 +437,56 @@ func (h *TicketHandler) HandleAssignTicket(w http.ResponseWriter, r *http.Reques
 	WriteJSON(w, http.StatusOK, toTicketDTO(ticket))
 }
 
+// TicketEventsResponse defines the JSON response for ticket events.
+type TicketEventsResponse struct {
+	Data       []*domain.Event `json:"data"`
+	NextCursor *int64          `json:"nextCursor,omitempty"`
+}
+
+// HandleListTicketEvents handles GET /tickets/{ticketID}/events
+func (h *TicketHandler) HandleListTicketEvents(w http.ResponseWriter, r *http.Request) {
+	claims, ok := h.getClaims(w, r)
+	if !ok {
+		return
+	}
+
+	ticketID, err := h.parseTicketID(r)
+	if err != nil {
+		h.errorHandler.Handle(w, r, err)
+		return
+	}
+
+	afterID, limit, err := h.parseEventQuery(r)
+	if err != nil {
+		h.errorHandler.Handle(w, r, err)
+		return
+	}
+
+	params := ports.ListTicketEventsParams{
+		TicketID: ticketID,
+		ViewerID: claims.UserID,
+		AfterID:  afterID,
+		Limit:    limit,
+	}
+
+	events, err := h.eventService.ListTicketEvents(r.Context(), params)
+	if err != nil {
+		h.errorHandler.Handle(w, r, err)
+		return
+	}
+
+	var nextCursor *int64
+	if len(events) > 0 {
+		cursor := events[len(events)-1].ID
+		nextCursor = &cursor
+	}
+
+	WriteJSON(w, http.StatusOK, TicketEventsResponse{
+		Data:       events,
+		NextCursor: nextCursor,
+	})
+}
+
 // --- Helper methods ---
 
 // getClaims extracts and validates user claims from the request context
@@ -456,4 +512,38 @@ func (h *TicketHandler) parseTicketID(r *http.Request) (int64, error) {
 		return 0, v.Errors()
 	}
 	return ticketID, nil
+}
+
+func (h *TicketHandler) parseEventQuery(r *http.Request) (int64, int, error) {
+	v := validation.NewValidator()
+
+	afterID := int64(0)
+	if afterStr := r.URL.Query().Get("after"); afterStr != "" {
+		parsed, err := strconv.ParseInt(afterStr, 10, 64)
+		if err != nil || parsed < 0 {
+			v.Custom("after", false, "after must be a positive integer")
+		} else {
+			afterID = parsed
+		}
+	}
+
+	limit := defaultEventsLimit
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		parsed, err := strconv.Atoi(limitStr)
+		if err != nil || parsed <= 0 {
+			v.Custom("limit", false, "limit must be a positive integer")
+		} else {
+			limit = parsed
+		}
+	}
+
+	if limit > maxEventsLimit {
+		v.Custom("limit", false, "limit exceeds maximum")
+	}
+
+	if v.HasErrors() {
+		return 0, 0, v.Errors()
+	}
+
+	return afterID, limit, nil
 }

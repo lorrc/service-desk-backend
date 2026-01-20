@@ -12,7 +12,7 @@ import (
 
 // CommentRepository handles database operations for comments.
 type CommentRepository struct {
-	q db.Querier
+	pool *pgxpool.Pool
 }
 
 // Ensure implementation matches the interface.
@@ -21,7 +21,7 @@ var _ ports.CommentRepository = (*CommentRepository)(nil)
 // NewCommentRepository creates a new comment repository.
 func NewCommentRepository(pool *pgxpool.Pool) ports.CommentRepository {
 	return &CommentRepository{
-		q: db.New(pool),
+		pool: pool,
 	}
 }
 
@@ -38,13 +38,14 @@ func mapDBCommentToDomain(dbComment db.Comment) *domain.Comment {
 
 // Create persists a new comment to the database.
 func (r *CommentRepository) Create(ctx context.Context, comment *domain.Comment) (*domain.Comment, error) {
+	q := db.New(GetDBTX(ctx, r.pool))
 	params := db.CreateCommentParams{
 		TicketID: comment.TicketID,
 		AuthorID: pgtype.UUID{Bytes: comment.AuthorID, Valid: true},
 		Body:     comment.Body,
 	}
 
-	dbComment, err := r.q.CreateComment(ctx, params)
+	dbComment, err := q.CreateComment(ctx, params)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +54,8 @@ func (r *CommentRepository) Create(ctx context.Context, comment *domain.Comment)
 
 // ListByTicketID retrieves all comments for a specific ticket, ordered by creation.
 func (r *CommentRepository) ListByTicketID(ctx context.Context, ticketID int64) ([]*domain.Comment, error) {
-	dbComments, err := r.q.ListCommentsByTicketID(ctx, ticketID)
+	q := db.New(GetDBTX(ctx, r.pool))
+	dbComments, err := q.ListCommentsByTicketID(ctx, ticketID)
 	if err != nil {
 		return nil, err
 	}
