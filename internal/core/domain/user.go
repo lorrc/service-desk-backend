@@ -46,6 +46,19 @@ type User struct {
 	Email          string
 	HashedPassword string
 	CreatedAt      time.Time
+	IsActive       bool
+	LastActiveAt   *time.Time
+}
+
+type UserSummary struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	FullName       string
+	Email          string
+	Roles          []string
+	IsActive       bool
+	CreatedAt      time.Time
+	LastActiveAt   *time.Time
 }
 
 // UserRegistrationParams holds parameters for user registration
@@ -187,5 +200,6 @@ func NewUser(params UserRegistrationParams, orgID uuid.UUID) (*User, error) {
 		Email:          params.Email,
 		HashedPassword: hashedPassword,
 		CreatedAt:      time.Now().UTC(),
+		IsActive:       true,
 	}, nil
 }

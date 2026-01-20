@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	mw "github.com/lorrc/service-desk-backend/internal/adapters/primary/http/middleware"
@@ -67,6 +68,33 @@ func (r *CreateCommentRequest) Validate() error {
 	return nil
 }
 
+// CommentDTO defines the JSON response for comments.
+type CommentDTO struct {
+	ID        string `json:"id"`
+	TicketID  int64  `json:"ticketId"`
+	AuthorID  string `json:"authorId"`
+	Body      string `json:"body"`
+	CreatedAt string `json:"createdAt"`
+}
+
+func toCommentDTO(comment *domain.Comment) CommentDTO {
+	return CommentDTO{
+		ID:        strconv.FormatInt(comment.ID, 10),
+		TicketID:  comment.TicketID,
+		AuthorID:  comment.AuthorID.String(),
+		Body:      comment.Body,
+		CreatedAt: comment.CreatedAt.Format(time.RFC3339),
+	}
+}
+
+func toCommentDTOs(comments []*domain.Comment) []CommentDTO {
+	response := make([]CommentDTO, 0, len(comments))
+	for _, comment := range comments {
+		response = append(response, toCommentDTO(comment))
+	}
+	return response
+}
+
 // --- Handlers ---
 
 // HandleCreateComment handles requests to create a new comment.
@@ -111,7 +139,7 @@ func (h *CommentHandler) HandleCreateComment(w http.ResponseWriter, r *http.Requ
 		"user_id", claims.UserID,
 	)
 
-	WriteCreated(w, comment)
+	WriteCreated(w, toCommentDTO(comment))
 }
 
 // HandleListComments handles requests to list comments for a ticket.
@@ -138,7 +166,7 @@ func (h *CommentHandler) HandleListComments(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	WriteList(w, comments)
+	WriteList(w, toCommentDTOs(comments))
 }
 
 // --- Helper methods ---

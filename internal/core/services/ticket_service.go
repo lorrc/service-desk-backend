@@ -140,19 +140,19 @@ func (s *TicketService) UpdateStatus(ctx context.Context, params ports.UpdateSta
 
 // AssignTicket assigns a ticket to an agent
 func (s *TicketService) AssignTicket(ctx context.Context, params ports.AssignTicketParams) (*domain.Ticket, error) {
-	// 1. Authorization Check
+	// 1. Fetch ticket with access controls to avoid assigning tickets the actor cannot see.
+	ticket, err := s.GetTicket(ctx, params.TicketID, params.ActorID)
+	if err != nil {
+		return nil, err
+	}
+
+	// 2. Authorization check: only users with tickets:assign can assign.
 	canAssign, err := s.authzSvc.Can(ctx, params.ActorID, "tickets:assign")
 	if err != nil {
 		return nil, err
 	}
 	if !canAssign {
 		return nil, apperrors.ErrForbidden
-	}
-
-	// 2. Fetch and update domain entity
-	ticket, err := s.ticketRepo.GetByID(ctx, params.TicketID)
-	if err != nil {
-		return nil, err
 	}
 
 	// 3. Apply assignment (domain validates business rules)
@@ -174,11 +174,35 @@ func (s *TicketService) ListTickets(ctx context.Context, params ports.ListTicket
 
 	fetchLimit := params.Limit + 1
 
+	assigneeID := pgtype.UUID{}
+	if params.AssigneeID != nil {
+		assigneeID = pgtype.UUID{Bytes: *params.AssigneeID, Valid: true}
+	}
+
+	createdFrom := pgtype.Timestamptz{}
+	if params.CreatedFrom != nil {
+		createdFrom = pgtype.Timestamptz{Time: *params.CreatedFrom, Valid: true}
+	}
+
+	createdTo := pgtype.Timestamptz{}
+	if params.CreatedTo != nil {
+		createdTo = pgtype.Timestamptz{Time: *params.CreatedTo, Valid: true}
+	}
+
+	unassigned := pgtype.Bool{}
+	if params.Unassigned {
+		unassigned = pgtype.Bool{Bool: true, Valid: true}
+	}
+
 	repoParams := ports.ListTicketsRepoParams{
-		Limit:    int32(fetchLimit),
-		Offset:   int32(params.Offset),
-		Status:   utils.ToNullString(params.Status),
-		Priority: utils.ToNullString(params.Priority),
+		Limit:       int32(fetchLimit),
+		Offset:      int32(params.Offset),
+		Status:      utils.ToNullString(params.Status),
+		Priority:    utils.ToNullString(params.Priority),
+		AssigneeID:  assigneeID,
+		Unassigned:  unassigned,
+		CreatedFrom: createdFrom,
+		CreatedTo:   createdTo,
 	}
 
 	// ... execute query ...

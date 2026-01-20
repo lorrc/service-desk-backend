@@ -2,11 +2,13 @@ package validation
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	apperrors "github.com/lorrc/service-desk-backend/internal/core/errors"
 )
@@ -230,6 +232,30 @@ func ParseStringQueryParam(r *http.Request, key string) *string {
 		return nil
 	}
 	return &value
+}
+
+// ParsedTime represents a parsed time value from a query parameter.
+type ParsedTime struct {
+	Time     time.Time
+	DateOnly bool
+}
+
+// ParseTimeQueryParam parses a date-only or RFC3339 timestamp query parameter.
+func ParseTimeQueryParam(r *http.Request, key string) (*ParsedTime, error) {
+	value := strings.TrimSpace(r.URL.Query().Get(key))
+	if value == "" {
+		return nil, nil
+	}
+
+	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
+		return &ParsedTime{Time: parsed, DateOnly: false}, nil
+	}
+
+	if parsed, err := time.Parse("2006-01-02", value); err == nil {
+		return &ParsedTime{Time: parsed, DateOnly: true}, nil
+	}
+
+	return nil, fmt.Errorf("invalid time value for %s", key)
 }
 
 // ParseBoolQueryParam safely parses a boolean query parameter

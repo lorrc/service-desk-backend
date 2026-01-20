@@ -14,7 +14,7 @@ import (
 const createTicket = `-- name: CreateTicket :one
 INSERT INTO tickets (title, description, status, priority, requester_id)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, title, description, status, priority, requester_id, assignee_id, created_at, updated_at
+RETURNING id, title, description, status, priority, requester_id, assignee_id, created_at, updated_at, closed_at
 `
 
 type CreateTicketParams struct {
@@ -44,12 +44,13 @@ func (q *Queries) CreateTicket(ctx context.Context, arg CreateTicketParams) (Tic
 		&i.AssigneeID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ClosedAt,
 	)
 	return i, err
 }
 
 const getTicketByID = `-- name: GetTicketByID :one
-SELECT id, title, description, status, priority, requester_id, assignee_id, created_at, updated_at FROM tickets
+SELECT id, title, description, status, priority, requester_id, assignee_id, created_at, updated_at, closed_at FROM tickets
 WHERE id = $1 LIMIT 1
 `
 
@@ -66,29 +67,43 @@ func (q *Queries) GetTicketByID(ctx context.Context, id int64) (Ticket, error) {
 		&i.AssigneeID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ClosedAt,
 	)
 	return i, err
 }
 
 const listTicketsByRequesterPaginated = `-- name: ListTicketsByRequesterPaginated :many
-SELECT id, title, description, status, priority, requester_id, assignee_id, created_at, updated_at FROM tickets
+SELECT id, title, description, status, priority, requester_id, assignee_id, created_at, updated_at, closed_at FROM tickets
 WHERE
     requester_id = $1
   AND
     (status = $2 OR $2 IS NULL)
   AND
     (priority = $3 OR $3 IS NULL)
+  AND
+    (
+      ($4 = TRUE AND assignee_id IS NULL)
+      OR ($4 IS NULL AND (assignee_id = $5 OR $5 IS NULL))
+    )
+  AND
+    (created_at >= $6 OR $6 IS NULL)
+  AND
+    (created_at < $7 OR $7 IS NULL)
 ORDER BY created_at DESC
-LIMIT $5
-    OFFSET $4
+LIMIT $9
+    OFFSET $8
 `
 
 type ListTicketsByRequesterPaginatedParams struct {
-	RequesterID pgtype.UUID `json:"requester_id"`
-	Status      pgtype.Text `json:"status"`
-	Priority    pgtype.Text `json:"priority"`
-	Offset      int32       `json:"offset"`
-	Limit       int32       `json:"limit"`
+	RequesterID pgtype.UUID        `json:"requester_id"`
+	Status      pgtype.Text        `json:"status"`
+	Priority    pgtype.Text        `json:"priority"`
+	Unassigned  interface{}        `json:"unassigned"`
+	AssigneeID  pgtype.UUID        `json:"assignee_id"`
+	CreatedFrom pgtype.Timestamptz `json:"created_from"`
+	CreatedTo   pgtype.Timestamptz `json:"created_to"`
+	Offset      int32              `json:"offset"`
+	Limit       int32              `json:"limit"`
 }
 
 func (q *Queries) ListTicketsByRequesterPaginated(ctx context.Context, arg ListTicketsByRequesterPaginatedParams) ([]Ticket, error) {
@@ -96,6 +111,10 @@ func (q *Queries) ListTicketsByRequesterPaginated(ctx context.Context, arg ListT
 		arg.RequesterID,
 		arg.Status,
 		arg.Priority,
+		arg.Unassigned,
+		arg.AssigneeID,
+		arg.CreatedFrom,
+		arg.CreatedTo,
 		arg.Offset,
 		arg.Limit,
 	)
@@ -116,6 +135,7 @@ func (q *Queries) ListTicketsByRequesterPaginated(ctx context.Context, arg ListT
 			&i.AssigneeID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ClosedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -128,27 +148,44 @@ func (q *Queries) ListTicketsByRequesterPaginated(ctx context.Context, arg ListT
 }
 
 const listTicketsPaginated = `-- name: ListTicketsPaginated :many
-SELECT id, title, description, status, priority, requester_id, assignee_id, created_at, updated_at FROM tickets
+SELECT id, title, description, status, priority, requester_id, assignee_id, created_at, updated_at, closed_at FROM tickets
 WHERE
     (status = $1 OR $1 IS NULL)
   AND
     (priority = $2 OR $2 IS NULL)
+  AND
+    (
+      ($3 = TRUE AND assignee_id IS NULL)
+      OR ($3 IS NULL AND (assignee_id = $4 OR $4 IS NULL))
+    )
+  AND
+    (created_at >= $5 OR $5 IS NULL)
+  AND
+    (created_at < $6 OR $6 IS NULL)
 ORDER BY created_at DESC
-LIMIT $4
-    OFFSET $3
+LIMIT $8
+    OFFSET $7
 `
 
 type ListTicketsPaginatedParams struct {
-	Status   pgtype.Text `json:"status"`
-	Priority pgtype.Text `json:"priority"`
-	Offset   int32       `json:"offset"`
-	Limit    int32       `json:"limit"`
+	Status      pgtype.Text        `json:"status"`
+	Priority    pgtype.Text        `json:"priority"`
+	Unassigned  interface{}        `json:"unassigned"`
+	AssigneeID  pgtype.UUID        `json:"assignee_id"`
+	CreatedFrom pgtype.Timestamptz `json:"created_from"`
+	CreatedTo   pgtype.Timestamptz `json:"created_to"`
+	Offset      int32              `json:"offset"`
+	Limit       int32              `json:"limit"`
 }
 
 func (q *Queries) ListTicketsPaginated(ctx context.Context, arg ListTicketsPaginatedParams) ([]Ticket, error) {
 	rows, err := q.db.Query(ctx, listTicketsPaginated,
 		arg.Status,
 		arg.Priority,
+		arg.Unassigned,
+		arg.AssigneeID,
+		arg.CreatedFrom,
+		arg.CreatedTo,
 		arg.Offset,
 		arg.Limit,
 	)
@@ -169,6 +206,7 @@ func (q *Queries) ListTicketsPaginated(ctx context.Context, arg ListTicketsPagin
 			&i.AssigneeID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ClosedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -185,9 +223,10 @@ UPDATE tickets
 SET
     status = $2,
     assignee_id = $3,
-    updated_at = $4
+    updated_at = $4,
+    closed_at = $5
 WHERE id = $1
-RETURNING id, title, description, status, priority, requester_id, assignee_id, created_at, updated_at
+RETURNING id, title, description, status, priority, requester_id, assignee_id, created_at, updated_at, closed_at
 `
 
 type UpdateTicketParams struct {
@@ -195,6 +234,7 @@ type UpdateTicketParams struct {
 	Status     string             `json:"status"`
 	AssigneeID pgtype.UUID        `json:"assignee_id"`
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	ClosedAt   pgtype.Timestamptz `json:"closed_at"`
 }
 
 func (q *Queries) UpdateTicket(ctx context.Context, arg UpdateTicketParams) (Ticket, error) {
@@ -203,6 +243,7 @@ func (q *Queries) UpdateTicket(ctx context.Context, arg UpdateTicketParams) (Tic
 		arg.Status,
 		arg.AssigneeID,
 		arg.UpdatedAt,
+		arg.ClosedAt,
 	)
 	var i Ticket
 	err := row.Scan(
@@ -215,6 +256,7 @@ func (q *Queries) UpdateTicket(ctx context.Context, arg UpdateTicketParams) (Tic
 		&i.AssigneeID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ClosedAt,
 	)
 	return i, err
 }

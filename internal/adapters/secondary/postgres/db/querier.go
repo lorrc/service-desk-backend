@@ -23,6 +23,7 @@ type Querier interface {
 	ListCommentsByTicketID(ctx context.Context, ticketID int64) ([]Comment, error)
 	ListTicketsByRequesterPaginated(ctx context.Context, arg ListTicketsByRequesterPaginatedParams) ([]Ticket, error)
 	ListTicketsPaginated(ctx context.Context, arg ListTicketsPaginatedParams) ([]Ticket, error)
+	SetUserRole(ctx context.Context, arg SetUserRoleParams) (string, error)
 	UpdateTicket(ctx context.Context, arg UpdateTicketParams) (Ticket, error)
 }
 

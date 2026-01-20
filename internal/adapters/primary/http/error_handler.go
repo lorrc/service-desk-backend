@@ -89,6 +89,11 @@ func (h *ErrorHandler) mapDomainError(err error) (int, ErrorResponse) {
 			Error: "You do not have permission to perform this action",
 			Code:  "FORBIDDEN",
 		}
+	case errors.Is(err, apperrors.ErrUserInactive):
+		return http.StatusForbidden, ErrorResponse{
+			Error: "User account is inactive",
+			Code:  "USER_INACTIVE",
+		}
 
 	// Not Found errors
 	case errors.Is(err, apperrors.ErrUserNotFound):

@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -129,6 +130,61 @@ func (r *AssignTicketRequest) Validate() error {
 	return nil
 }
 
+// TicketDTO defines the JSON response for tickets.
+type TicketDTO struct {
+	ID          int64   `json:"id"`
+	Title       string  `json:"title"`
+	Description string  `json:"description"`
+	Status      string  `json:"status"`
+	Priority    string  `json:"priority"`
+	RequesterID string  `json:"requesterId"`
+	AssigneeID  *string `json:"assigneeId"`
+	CreatedAt   string  `json:"createdAt"`
+	UpdatedAt   *string `json:"updatedAt"`
+	ClosedAt    *string `json:"closedAt"`
+}
+
+func toTicketDTO(ticket *domain.Ticket) TicketDTO {
+	var assigneeID *string
+	if ticket.AssigneeID != nil {
+		value := ticket.AssigneeID.String()
+		assigneeID = &value
+	}
+
+	var updatedAt *string
+	if ticket.UpdatedAt != nil {
+		value := ticket.UpdatedAt.Format(time.RFC3339)
+		updatedAt = &value
+	}
+
+	var closedAt *string
+	if ticket.ClosedAt != nil {
+		value := ticket.ClosedAt.Format(time.RFC3339)
+		closedAt = &value
+	}
+
+	return TicketDTO{
+		ID:          ticket.ID,
+		Title:       ticket.Title,
+		Description: ticket.Description,
+		Status:      string(ticket.Status),
+		Priority:    string(ticket.Priority),
+		RequesterID: ticket.RequesterID.String(),
+		AssigneeID:  assigneeID,
+		CreatedAt:   ticket.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:   updatedAt,
+		ClosedAt:    closedAt,
+	}
+}
+
+func toTicketDTOs(tickets []*domain.Ticket) []TicketDTO {
+	response := make([]TicketDTO, 0, len(tickets))
+	for _, ticket := range tickets {
+		response = append(response, toTicketDTO(ticket))
+	}
+	return response
+}
+
 // --- Handlers ---
 
 // HandleListTickets handles GET /tickets
@@ -144,13 +200,67 @@ func (h *TicketHandler) HandleListTickets(w http.ResponseWriter, r *http.Request
 	// Parse optional filters
 	status := validation.ParseStringQueryParam(r, "status")
 	priority := validation.ParseStringQueryParam(r, "priority")
+	unassigned := validation.ParseBoolQueryParam(r, "unassigned", false)
+
+	v := validation.NewValidator()
+
+	var assigneeID *uuid.UUID
+	if assigneeIDStr := r.URL.Query().Get("assigneeId"); assigneeIDStr != "" {
+		parsedAssigneeID, err := uuid.Parse(assigneeIDStr)
+		if err != nil {
+			v.Custom("assigneeId", false, "Must be a valid UUID")
+		} else {
+			assigneeID = &parsedAssigneeID
+		}
+	}
+
+	createdFrom, err := validation.ParseTimeQueryParam(r, "createdFrom")
+	if err != nil {
+		v.Custom("createdFrom", false, "Must be a valid date or timestamp")
+	}
+
+	createdTo, err := validation.ParseTimeQueryParam(r, "createdTo")
+	if err != nil {
+		v.Custom("createdTo", false, "Must be a valid date or timestamp")
+	}
+
+	var createdFromTime *time.Time
+	if createdFrom != nil {
+		createdFromTime = &createdFrom.Time
+	}
+
+	var createdToTime *time.Time
+	if createdTo != nil {
+		adjusted := createdTo.Time
+		if createdTo.DateOnly {
+			adjusted = adjusted.Add(24 * time.Hour)
+		}
+		createdToTime = &adjusted
+	}
+
+	if createdFromTime != nil && createdToTime != nil && createdFromTime.After(*createdToTime) {
+		v.Custom("createdFrom", false, "Must be before createdTo")
+	}
+
+	if unassigned {
+		assigneeID = nil
+	}
+
+	if v.HasErrors() {
+		h.errorHandler.Handle(w, r, v.Errors())
+		return
+	}
 
 	params := ports.ListTicketsParams{
-		ViewerID: claims.UserID,
-		Limit:    pagination.Limit + 1,
-		Offset:   pagination.Offset,
-		Status:   status,
-		Priority: priority,
+		ViewerID:    claims.UserID,
+		Limit:       pagination.Limit + 1,
+		Offset:      pagination.Offset,
+		Status:      status,
+		Priority:    priority,
+		AssigneeID:  assigneeID,
+		Unassigned:  unassigned,
+		CreatedFrom: createdFromTime,
+		CreatedTo:   createdToTime,
 	}
 
 	tickets, err := h.ticketService.ListTickets(r.Context(), params)
@@ -160,7 +270,7 @@ func (h *TicketHandler) HandleListTickets(w http.ResponseWriter, r *http.Request
 	}
 
 	// Use simple pagination (without total count for performance)
-	WritePaginatedSimple(w, tickets, pagination.Limit, pagination.Offset)
+	WritePaginatedSimple(w, toTicketDTOs(tickets), pagination.Limit, pagination.Offset)
 }
 
 // HandleCreateTicket handles POST /tickets
@@ -199,7 +309,7 @@ func (h *TicketHandler) HandleCreateTicket(w http.ResponseWriter, r *http.Reques
 		"user_id", claims.UserID,
 	)
 
-	WriteCreated(w, ticket)
+	WriteCreated(w, toTicketDTO(ticket))
 }
 
 // HandleGetTicket handles GET /tickets/{ticketID}
@@ -221,7 +331,7 @@ func (h *TicketHandler) HandleGetTicket(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	WriteJSON(w, http.StatusOK, ticket)
+	WriteJSON(w, http.StatusOK, toTicketDTO(ticket))
 }
 
 // HandleUpdateTicketStatus handles PATCH /tickets/{ticketID}/status
@@ -266,7 +376,7 @@ func (h *TicketHandler) HandleUpdateTicketStatus(w http.ResponseWriter, r *http.
 		"user_id", claims.UserID,
 	)
 
-	WriteJSON(w, http.StatusOK, ticket)
+	WriteJSON(w, http.StatusOK, toTicketDTO(ticket))
 }
 
 // HandleAssignTicket handles PATCH /tickets/{ticketID}/assignee
@@ -318,7 +428,7 @@ func (h *TicketHandler) HandleAssignTicket(w http.ResponseWriter, r *http.Reques
 		"user_id", claims.UserID,
 	)
 
-	WriteJSON(w, http.StatusOK, ticket)
+	WriteJSON(w, http.StatusOK, toTicketDTO(ticket))
 }
 
 // --- Helper methods ---

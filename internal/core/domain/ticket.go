@@ -88,6 +88,7 @@ type Ticket struct {
 	AssigneeID  *uuid.UUID
 	CreatedAt   time.Time
 	UpdatedAt   *time.Time
+	ClosedAt    *time.Time
 }
 
 // TicketParams holds parameters for creating a new ticket
@@ -177,6 +178,11 @@ func (t *Ticket) UpdateStatus(newStatus TicketStatus) error {
 	t.Status = newStatus
 	now := time.Now().UTC()
 	t.UpdatedAt = &now
+	if newStatus == StatusClosed {
+		t.ClosedAt = &now
+	} else {
+		t.ClosedAt = nil
+	}
 	return nil
 }
 

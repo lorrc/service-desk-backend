@@ -162,23 +162,24 @@ func TestTicket_UpdateStatus(t *testing.T) {
 		initialStatus domain.TicketStatus
 		newStatus     domain.TicketStatus
 		expectError   bool
+		expectClosed  bool
 	}{
 		// From OPEN
-		{"OPEN to IN_PROGRESS", domain.StatusOpen, domain.StatusInProgress, false},
-		{"OPEN to CLOSED", domain.StatusOpen, domain.StatusClosed, false},
-		{"OPEN to OPEN (no change)", domain.StatusOpen, domain.StatusOpen, true},
+		{"OPEN to IN_PROGRESS", domain.StatusOpen, domain.StatusInProgress, false, false},
+		{"OPEN to CLOSED", domain.StatusOpen, domain.StatusClosed, false, true},
+		{"OPEN to OPEN (no change)", domain.StatusOpen, domain.StatusOpen, true, false},
 
 		// From IN_PROGRESS
-		{"IN_PROGRESS to OPEN", domain.StatusInProgress, domain.StatusOpen, false},
-		{"IN_PROGRESS to CLOSED", domain.StatusInProgress, domain.StatusClosed, false},
-		{"IN_PROGRESS to IN_PROGRESS", domain.StatusInProgress, domain.StatusInProgress, true},
+		{"IN_PROGRESS to OPEN", domain.StatusInProgress, domain.StatusOpen, false, false},
+		{"IN_PROGRESS to CLOSED", domain.StatusInProgress, domain.StatusClosed, false, true},
+		{"IN_PROGRESS to IN_PROGRESS", domain.StatusInProgress, domain.StatusInProgress, true, false},
 
 		// From CLOSED (no transitions allowed)
-		{"CLOSED to OPEN", domain.StatusClosed, domain.StatusOpen, true},
-		{"CLOSED to IN_PROGRESS", domain.StatusClosed, domain.StatusInProgress, true},
+		{"CLOSED to OPEN", domain.StatusClosed, domain.StatusOpen, true, true},
+		{"CLOSED to IN_PROGRESS", domain.StatusClosed, domain.StatusInProgress, true, true},
 
 		// Invalid status
-		{"OPEN to INVALID", domain.StatusOpen, domain.TicketStatus("INVALID"), true},
+		{"OPEN to INVALID", domain.StatusOpen, domain.TicketStatus("INVALID"), true, false},
 	}
 
 	for _, tt := range tests {
@@ -200,6 +201,12 @@ func TestTicket_UpdateStatus(t *testing.T) {
 				assert.NoError(t, err)
 				assert.Equal(t, tt.newStatus, ticket.Status)
 				assert.NotNil(t, ticket.UpdatedAt)
+				if tt.expectClosed {
+					assert.NotNil(t, ticket.ClosedAt)
+					assert.Equal(t, *ticket.UpdatedAt, *ticket.ClosedAt)
+				} else {
+					assert.Nil(t, ticket.ClosedAt)
+				}
 			}
 		})
 	}

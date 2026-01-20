@@ -25,7 +25,7 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (organization_id, full_name, email, hashed_password)
 VALUES ($1, $2, $3, $4)
-    RETURNING id, organization_id, full_name, email, hashed_password, created_at
+    RETURNING id, organization_id, full_name, email, hashed_password, created_at, is_active, last_active_at
 `
 
 type CreateUserParams struct {
@@ -50,12 +50,14 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.Email,
 		&i.HashedPassword,
 		&i.CreatedAt,
+		&i.IsActive,
+		&i.LastActiveAt,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, organization_id, full_name, email, hashed_password, created_at FROM users
+SELECT id, organization_id, full_name, email, hashed_password, created_at, is_active, last_active_at FROM users
 WHERE email = $1 LIMIT 1
 `
 
@@ -69,12 +71,14 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.Email,
 		&i.HashedPassword,
 		&i.CreatedAt,
+		&i.IsActive,
+		&i.LastActiveAt,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, organization_id, full_name, email, hashed_password, created_at FROM users
+SELECT id, organization_id, full_name, email, hashed_password, created_at, is_active, last_active_at FROM users
 WHERE id = $1 LIMIT 1
 `
 
@@ -88,6 +92,8 @@ func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 		&i.Email,
 		&i.HashedPassword,
 		&i.CreatedAt,
+		&i.IsActive,
+		&i.LastActiveAt,
 	)
 	return i, err
 }

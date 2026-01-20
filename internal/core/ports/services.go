@@ -2,6 +2,7 @@ package ports
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/lorrc/service-desk-backend/internal/core/domain"
@@ -16,6 +17,21 @@ type AuthService interface {
 // AuthorizationService defines the port for checking user permissions.
 type AuthorizationService interface {
 	Can(ctx context.Context, userID uuid.UUID, permission string) (bool, error)
+	GetPermissions(ctx context.Context, userID uuid.UUID) ([]string, error)
+}
+
+// AssigneeService defines the port for listing assignable users.
+type AssigneeService interface {
+	ListAssignableUsers(ctx context.Context, actorID uuid.UUID, orgID uuid.UUID) ([]*domain.User, error)
+}
+
+// AdminService defines the port for admin-only operations.
+type AdminService interface {
+	ListUsers(ctx context.Context, actorID, orgID uuid.UUID) ([]*domain.UserSummary, error)
+	UpdateUserRole(ctx context.Context, actorID, orgID, userID uuid.UUID, role string) error
+	UpdateUserStatus(ctx context.Context, actorID, orgID, userID uuid.UUID, isActive bool) error
+	ResetUserPassword(ctx context.Context, actorID, orgID, userID uuid.UUID) (string, error)
+	GetAnalyticsOverview(ctx context.Context, actorID, orgID uuid.UUID, days int) (*domain.AnalyticsOverview, error)
 }
 
 // CreateTicketParams defines the required input for creating a new ticket.
@@ -55,11 +71,15 @@ type GetCommentsParams struct {
 
 // ListTicketsParams defines the input for listing tickets.
 type ListTicketsParams struct {
-	ViewerID uuid.UUID
-	Limit    int
-	Offset   int
-	Status   *string
-	Priority *string
+	ViewerID    uuid.UUID
+	Limit       int
+	Offset      int
+	Status      *string
+	Priority    *string
+	AssigneeID  *uuid.UUID
+	Unassigned  bool
+	CreatedFrom *time.Time
+	CreatedTo   *time.Time
 }
 
 // NotificationParams defines the input for sending a notification.

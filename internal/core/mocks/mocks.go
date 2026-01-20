@@ -2,6 +2,7 @@ package mocks
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/lorrc/service-desk-backend/internal/core/domain"
@@ -45,6 +46,37 @@ func (m *MockUserRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain
 func (m *MockUserRepository) CountUsers(ctx context.Context) (int64, error) {
 	args := m.Called(ctx)
 	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *MockUserRepository) ListAssignableUsers(ctx context.Context, orgID uuid.UUID) ([]*domain.User, error) {
+	args := m.Called(ctx, orgID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*domain.User), args.Error(1)
+}
+
+func (m *MockUserRepository) ListByOrganization(ctx context.Context, orgID uuid.UUID) ([]*domain.UserSummary, error) {
+	args := m.Called(ctx, orgID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*domain.UserSummary), args.Error(1)
+}
+
+func (m *MockUserRepository) SetActive(ctx context.Context, userID uuid.UUID, isActive bool) error {
+	args := m.Called(ctx, userID, isActive)
+	return args.Error(0)
+}
+
+func (m *MockUserRepository) UpdatePassword(ctx context.Context, userID uuid.UUID, hashedPassword string) error {
+	args := m.Called(ctx, userID, hashedPassword)
+	return args.Error(0)
+}
+
+func (m *MockUserRepository) UpdateLastActive(ctx context.Context, userID uuid.UUID, at time.Time) error {
+	args := m.Called(ctx, userID, at)
+	return args.Error(0)
 }
 
 // MockTicketRepository is a mock implementation of ports.TicketRepository
@@ -118,6 +150,16 @@ func (m *MockAuthorizationRepository) AssignRole(ctx context.Context, userID uui
 	return args.Error(0)
 }
 
+func (m *MockAuthorizationRepository) SetUserRole(ctx context.Context, userID uuid.UUID, roleName string) error {
+	args := m.Called(ctx, userID, roleName)
+	return args.Error(0)
+}
+
+func (m *MockAuthorizationRepository) EnsureRBACDefaults(ctx context.Context) error {
+	args := m.Called(ctx)
+	return args.Error(0)
+}
+
 // MockCommentRepository is a mock implementation of ports.CommentRepository
 type MockCommentRepository struct {
 	mock.Mock
@@ -155,6 +197,14 @@ func NewMockAuthorizationService() *MockAuthorizationService {
 func (m *MockAuthorizationService) Can(ctx context.Context, userID uuid.UUID, permission string) (bool, error) {
 	args := m.Called(ctx, userID, permission)
 	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockAuthorizationService) GetPermissions(ctx context.Context, userID uuid.UUID) ([]string, error) {
+	args := m.Called(ctx, userID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]string), args.Error(1)
 }
 
 // MockTicketService is a mock implementation of ports.TicketService

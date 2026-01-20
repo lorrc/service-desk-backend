@@ -2,6 +2,7 @@ package ports
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -14,6 +15,11 @@ type UserRepository interface {
 	GetByEmail(ctx context.Context, email string) (*domain.User, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error)
 	CountUsers(ctx context.Context) (int64, error)
+	ListAssignableUsers(ctx context.Context, orgID uuid.UUID) ([]*domain.User, error)
+	ListByOrganization(ctx context.Context, orgID uuid.UUID) ([]*domain.UserSummary, error)
+	SetActive(ctx context.Context, userID uuid.UUID, isActive bool) error
+	UpdatePassword(ctx context.Context, userID uuid.UUID, hashedPassword string) error
+	UpdateLastActive(ctx context.Context, userID uuid.UUID, at time.Time) error
 }
 
 // TicketRepository defines the port for ticket persistence.
@@ -29,6 +35,13 @@ type TicketRepository interface {
 type AuthorizationRepository interface {
 	GetUserPermissions(ctx context.Context, userID uuid.UUID) ([]string, error)
 	AssignRole(ctx context.Context, userID uuid.UUID, roleName string) error
+	SetUserRole(ctx context.Context, userID uuid.UUID, roleName string) error
+	EnsureRBACDefaults(ctx context.Context) error
+}
+
+// AnalyticsRepository defines the port for analytics data access.
+type AnalyticsRepository interface {
+	GetOverview(ctx context.Context, orgID uuid.UUID, days int) (*domain.AnalyticsOverview, error)
 }
 
 // CommentRepository defines the port for comment persistence.
@@ -44,4 +57,8 @@ type ListTicketsRepoParams struct {
 	Status      pgtype.Text
 	Priority    pgtype.Text
 	RequesterID pgtype.UUID
+	AssigneeID  pgtype.UUID
+	Unassigned  pgtype.Bool
+	CreatedFrom pgtype.Timestamptz
+	CreatedTo   pgtype.Timestamptz
 }

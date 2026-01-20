@@ -47,6 +47,7 @@ type Ticket struct {
 	AssigneeID  pgtype.UUID        `json:"assignee_id"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ClosedAt    pgtype.Timestamptz `json:"closed_at"`
 }
 
 type User struct {
@@ -56,6 +57,8 @@ type User struct {
 	Email          string             `json:"email"`
 	HashedPassword string             `json:"hashed_password"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	IsActive       bool               `json:"is_active"`
+	LastActiveAt   pgtype.Timestamptz `json:"last_active_at"`
 }
 
 type UserRole struct {

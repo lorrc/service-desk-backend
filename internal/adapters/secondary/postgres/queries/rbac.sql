@@ -21,3 +21,22 @@ SELECT
         WHEN EXISTS (SELECT 1 FROM ins) THEN 'assigned'
         ELSE 'already_assigned'
     END AS status;
+
+-- name: SetUserRole :one
+WITH target_role AS (
+    SELECT id FROM roles WHERE name = sqlc.arg('role_name')
+),
+deleted AS (
+    DELETE FROM user_roles ur WHERE ur.user_id = sqlc.arg('user_id')
+),
+inserted AS (
+    INSERT INTO user_roles (user_id, role_id)
+    SELECT sqlc.arg('user_id'), id FROM target_role
+    RETURNING role_id
+)
+SELECT
+    CASE
+        WHEN NOT EXISTS (SELECT 1 FROM target_role) THEN 'role_not_found'
+        WHEN EXISTS (SELECT 1 FROM inserted) THEN 'assigned'
+        ELSE 'not_assigned'
+    END AS status;

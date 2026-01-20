@@ -188,10 +188,13 @@ func TestAuthService_Login(t *testing.T) {
 			Email:          "user@example.com",
 			FullName:       "Test User",
 			HashedPassword: hash,
+			IsActive:       true,
 		}
 
 		mockUserRepo.On("GetByEmail", ctx, "user@example.com").
 			Return(existingUser, nil)
+		mockUserRepo.On("UpdateLastActive", ctx, existingUser.ID, mock.AnythingOfType("time.Time")).
+			Return(nil)
 
 		user, err := svc.Login(ctx, "user@example.com", "Password123")
 
@@ -226,6 +229,7 @@ func TestAuthService_Login(t *testing.T) {
 			ID:             uuid.New(),
 			Email:          "user@example.com",
 			HashedPassword: hash,
+			IsActive:       true,
 		}
 
 		mockUserRepo.On("GetByEmail", ctx, "user@example.com").

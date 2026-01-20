@@ -27,7 +27,7 @@ func TestUserRepository_CreateGet(t *testing.T) {
 	_, userRepo := newTestRepos(t)
 
 	// 1. Create a new user
-	orgID := uuid.New()
+	orgID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	newUser := &domain.User{
 		ID:             uuid.New(),
 		FullName:       "Test User",

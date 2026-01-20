@@ -118,6 +118,10 @@ func run() error {
 	ticketRepo := postgres.NewTicketRepository(pool)
 	authzRepo := postgres.NewAuthorizationRepository(pool)
 	commentRepo := postgres.NewCommentRepository(pool)
+	analyticsRepo := postgres.NewAnalyticsRepository(pool)
+	if err := authzRepo.EnsureRBACDefaults(ctx); err != nil {
+		return fmt.Errorf("ensure rbac defaults: %w", err)
+	}
 
 	// FIX: Don't use Mock in production
 	var notifier ports.Notifier // Use your interface type
@@ -131,8 +135,10 @@ func run() error {
 
 	authService := services.NewAuthService(userRepo, authzRepo, defaultOrgID)
 	authzService := services.NewAuthorizationService(authzRepo)
+	assigneeService := services.NewAssigneeService(userRepo, authzService)
 	ticketService := services.NewTicketService(ticketRepo, authzService, notifier, hub)
 	commentService := services.NewCommentService(commentRepo, ticketService, authzService, notifier, hub)
+	adminService := services.NewAdminService(userRepo, authzRepo, authzService, analyticsRepo)
 
 	// Seed admin user if configured
 	if err := seedAdminUser(ctx, cfg.Admin, authService, logger); err != nil {
@@ -140,6 +146,9 @@ func run() error {
 	}
 
 	authHandler := httpAdapter.NewAuthHandler(authService, tokenManager, errorHandler, logger)
+	meHandler := httpAdapter.NewMeHandler(authzService, errorHandler, logger)
+	assigneeHandler := httpAdapter.NewAssigneeHandler(assigneeService, errorHandler, logger)
+	adminHandler := httpAdapter.NewAdminHandler(adminService, errorHandler, logger)
 	commentHandler := httpAdapter.NewCommentHandler(commentService, errorHandler, logger)
 	ticketHandler := httpAdapter.NewTicketHandler(ticketService, commentHandler, errorHandler, logger)
 	wsHandler := httpAdapter.NewWebSocketHandler(hub, tokenManager, cfg, logger)
@@ -182,6 +191,9 @@ func run() error {
 
 		r.Group(func(r chi.Router) {
 			r.Use(mw.JWTMiddleware(tokenManager))
+			r.Route("/me", meHandler.RegisterRoutes)
+			r.Route("/assignees", assigneeHandler.RegisterRoutes)
+			r.Route("/admin", adminHandler.RegisterRoutes)
 			r.Route("/tickets", ticketHandler.RegisterRoutes)
 		})
 	})

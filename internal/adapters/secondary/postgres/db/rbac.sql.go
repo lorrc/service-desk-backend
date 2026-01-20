@@ -68,3 +68,35 @@ func (q *Queries) GetUserPermissions(ctx context.Context, userID pgtype.UUID) ([
 	}
 	return items, nil
 }
+
+const setUserRole = `-- name: SetUserRole :one
+WITH target_role AS (
+    SELECT id FROM roles WHERE name = $1
+),
+deleted AS (
+    DELETE FROM user_roles ur WHERE ur.user_id = $2
+),
+inserted AS (
+    INSERT INTO user_roles (user_id, role_id)
+    SELECT $2, id FROM target_role
+    RETURNING role_id
+)
+SELECT
+    CASE
+        WHEN NOT EXISTS (SELECT 1 FROM target_role) THEN 'role_not_found'
+        WHEN EXISTS (SELECT 1 FROM inserted) THEN 'assigned'
+        ELSE 'not_assigned'
+    END AS status
+`
+
+type SetUserRoleParams struct {
+	RoleName string      `json:"role_name"`
+	UserID   pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) SetUserRole(ctx context.Context, arg SetUserRoleParams) (string, error) {
+	row := q.db.QueryRow(ctx, setUserRole, arg.RoleName, arg.UserID)
+	var status string
+	err := row.Scan(&status)
+	return status, err
+}

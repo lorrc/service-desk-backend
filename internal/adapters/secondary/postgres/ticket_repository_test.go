@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -13,6 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+var defaultOrgID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
+
 // Helper to create a user for ticket tests
 func createTestUser(t *testing.T, ctx context.Context, userRepo ports.UserRepository) *domain.User {
 	user := &domain.User{
@@ -20,7 +23,7 @@ func createTestUser(t *testing.T, ctx context.Context, userRepo ports.UserReposi
 		FullName:       "Ticket Requester",
 		Email:          uuid.NewString() + "@example.com", // Ensure unique email
 		HashedPassword: "testpassword",
-		OrganizationID: uuid.New(),
+		OrganizationID: defaultOrgID,
 	}
 	createdUser, err := userRepo.Create(ctx, user)
 	require.NoError(t, err)
@@ -35,12 +38,13 @@ func TestTicketRepository_CreateGet(t *testing.T) {
 	testUser := createTestUser(t, ctx, userRepo)
 
 	// 2. Create a new ticket
-	newTicket := &domain.Ticket{
+	newTicket, err := domain.NewTicket(domain.TicketParams{
 		Title:       "Test Ticket",
 		Description: "This is a description",
 		Priority:    domain.PriorityMedium,
 		RequesterID: testUser.ID,
-	}
+	})
+	require.NoError(t, err)
 
 	createdTicket, err := ticketRepo.Create(ctx, newTicket)
 	require.NoError(t, err, "Failed to create ticket")
@@ -126,4 +130,68 @@ func TestTicketRepository_PaginatedList(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, tickets5, 1)
 	assert.Equal(t, "T3", tickets5[0].Title)
+}
+
+func TestTicketRepository_ListFilters(t *testing.T) {
+	ctx := context.Background()
+	ticketRepo, userRepo := newTestRepos(t)
+
+	requester := createTestUser(t, ctx, userRepo)
+	assignee := createTestUser(t, ctx, userRepo)
+
+	ticket1, err := ticketRepo.Create(ctx, &domain.Ticket{Title: "T1", Priority: domain.PriorityHigh, RequesterID: requester.ID, Status: domain.StatusOpen})
+	require.NoError(t, err)
+	ticket2, err := ticketRepo.Create(ctx, &domain.Ticket{Title: "T2", Priority: domain.PriorityLow, RequesterID: requester.ID, Status: domain.StatusOpen})
+	require.NoError(t, err)
+	ticket3, err := ticketRepo.Create(ctx, &domain.Ticket{Title: "T3", Priority: domain.PriorityMedium, RequesterID: requester.ID, Status: domain.StatusOpen})
+	require.NoError(t, err)
+
+	require.NoError(t, ticket1.Assign(assignee.ID))
+	_, err = ticketRepo.Update(ctx, ticket1)
+	require.NoError(t, err)
+
+	createdAt1 := time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC)
+	createdAt2 := time.Date(2024, 1, 3, 10, 0, 0, 0, time.UTC)
+	createdAt3 := time.Date(2024, 1, 5, 10, 0, 0, 0, time.UTC)
+
+	_, err = testPool.Exec(ctx, "UPDATE tickets SET created_at = $1 WHERE id = $2", createdAt1, ticket1.ID)
+	require.NoError(t, err)
+	_, err = testPool.Exec(ctx, "UPDATE tickets SET created_at = $1 WHERE id = $2", createdAt2, ticket2.ID)
+	require.NoError(t, err)
+	_, err = testPool.Exec(ctx, "UPDATE tickets SET created_at = $1 WHERE id = $2", createdAt3, ticket3.ID)
+	require.NoError(t, err)
+
+	assigneeParams := ports.ListTicketsRepoParams{
+		RequesterID: pgtype.UUID{Bytes: requester.ID, Valid: true},
+		Limit:       10,
+		Offset:      0,
+		AssigneeID:  pgtype.UUID{Bytes: assignee.ID, Valid: true},
+	}
+	assigneeTickets, err := ticketRepo.ListByRequesterPaginated(ctx, assigneeParams)
+	require.NoError(t, err)
+	require.Len(t, assigneeTickets, 1)
+	assert.Equal(t, "T1", assigneeTickets[0].Title)
+
+	unassignedParams := ports.ListTicketsRepoParams{
+		RequesterID: pgtype.UUID{Bytes: requester.ID, Valid: true},
+		Limit:       10,
+		Offset:      0,
+		Unassigned:  pgtype.Bool{Bool: true, Valid: true},
+	}
+	unassignedTickets, err := ticketRepo.ListByRequesterPaginated(ctx, unassignedParams)
+	require.NoError(t, err)
+	require.Len(t, unassignedTickets, 2)
+	assert.ElementsMatch(t, []string{"T2", "T3"}, []string{unassignedTickets[0].Title, unassignedTickets[1].Title})
+
+	dateParams := ports.ListTicketsRepoParams{
+		RequesterID: pgtype.UUID{Bytes: requester.ID, Valid: true},
+		Limit:       10,
+		Offset:      0,
+		CreatedFrom: pgtype.Timestamptz{Time: time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC), Valid: true},
+		CreatedTo:   pgtype.Timestamptz{Time: time.Date(2024, 1, 5, 0, 0, 0, 0, time.UTC), Valid: true},
+	}
+	dateTickets, err := ticketRepo.ListByRequesterPaginated(ctx, dateParams)
+	require.NoError(t, err)
+	require.Len(t, dateTickets, 1)
+	assert.Equal(t, "T2", dateTickets[0].Title)
 }

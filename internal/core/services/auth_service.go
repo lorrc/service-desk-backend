@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt" // Added for error wrapping
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/lorrc/service-desk-backend/internal/core/domain"
@@ -123,6 +124,16 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (*domai
 	if !user.CheckPassword(password) {
 		return nil, apperrors.ErrInvalidCredentials
 	}
+
+	if !user.IsActive {
+		return nil, apperrors.ErrUserInactive
+	}
+
+	now := time.Now().UTC()
+	if err := s.userRepo.UpdateLastActive(ctx, user.ID, now); err != nil {
+		return nil, err
+	}
+	user.LastActiveAt = &now
 
 	return user, nil
 }

@@ -14,6 +14,7 @@ var (
 	ErrUnauthorized        = errors.New("unauthorized")
 	ErrRoleNotFound        = errors.New("role not found")
 	ErrRoleAlreadyAssigned = errors.New("role already assigned")
+	ErrUserInactive        = errors.New("user is inactive")
 
 	// ErrUserNotFound User validation
 	ErrUserNotFound     = errors.New("user not found")

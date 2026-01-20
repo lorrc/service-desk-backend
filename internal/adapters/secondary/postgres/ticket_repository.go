@@ -52,6 +52,9 @@ func mapDBTicketToDomain(dbTicket db.Ticket) *domain.Ticket {
 	if dbTicket.UpdatedAt.Valid {
 		domainTicket.UpdatedAt = &dbTicket.UpdatedAt.Time
 	}
+	if dbTicket.ClosedAt.Valid {
+		domainTicket.ClosedAt = &dbTicket.ClosedAt.Time
+	}
 
 	return domainTicket
 }
@@ -107,6 +110,10 @@ func (r *TicketRepository) Update(ctx context.Context, ticket *domain.Ticket) (*
 			Time:  time.Time{},
 			Valid: ticket.UpdatedAt != nil,
 		},
+		ClosedAt: pgtype.Timestamptz{
+			Time:  time.Time{},
+			Valid: ticket.ClosedAt != nil,
+		},
 	}
 
 	if ticket.AssigneeID != nil {
@@ -117,6 +124,9 @@ func (r *TicketRepository) Update(ctx context.Context, ticket *domain.Ticket) (*
 	} else {
 		params.UpdatedAt.Time = time.Now().UTC()
 		params.UpdatedAt.Valid = true
+	}
+	if ticket.ClosedAt != nil {
+		params.ClosedAt.Time = *ticket.ClosedAt
 	}
 
 	updatedTicket, err := r.q.UpdateTicket(ctx, params)
@@ -129,10 +139,14 @@ func (r *TicketRepository) Update(ctx context.Context, ticket *domain.Ticket) (*
 // ListPaginated retrieves all tickets with pagination and optional filters.
 func (r *TicketRepository) ListPaginated(ctx context.Context, params ports.ListTicketsRepoParams) ([]*domain.Ticket, error) {
 	dbParams := db.ListTicketsPaginatedParams{
-		Limit:    params.Limit,
-		Offset:   params.Offset,
-		Status:   params.Status,
-		Priority: params.Priority,
+		Limit:       params.Limit,
+		Offset:      params.Offset,
+		Status:      params.Status,
+		Priority:    params.Priority,
+		AssigneeID:  params.AssigneeID,
+		Unassigned:  params.Unassigned,
+		CreatedFrom: params.CreatedFrom,
+		CreatedTo:   params.CreatedTo,
 	}
 
 	dbTickets, err := r.q.ListTicketsPaginated(ctx, dbParams)
@@ -151,6 +165,10 @@ func (r *TicketRepository) ListByRequesterPaginated(ctx context.Context, params 
 		Offset:      params.Offset,
 		Status:      params.Status,
 		Priority:    params.Priority,
+		AssigneeID:  params.AssigneeID,
+		Unassigned:  params.Unassigned,
+		CreatedFrom: params.CreatedFrom,
+		CreatedTo:   params.CreatedTo,
 	}
 
 	dbTickets, err := r.q.ListTicketsByRequesterPaginated(ctx, dbParams)
