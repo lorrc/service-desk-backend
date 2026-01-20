@@ -157,13 +157,11 @@ func run() error {
 	// 7. Setup Router
 	r := chi.NewRouter()
 
-	// FIX: Middleware Order
 	r.Use(middleware.RealIP) // 1. Important for Rate Limiting behind proxy
 	r.Use(mw.RequestID)
 	r.Use(mw.RequestLogger(logger))
 	r.Use(mw.RecoveryLogger(logger))
 
-	// FIX: Add CORS
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"*"}, // TODO: Restrict in production
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
@@ -202,7 +200,7 @@ func run() error {
 		Addr:              cfg.Server.Port,
 		Handler:           r,
 		ReadTimeout:       cfg.Server.ReadTimeout,
-		ReadHeaderTimeout: 5 * time.Second, // FIX: Prevent Slowloris attacks
+		ReadHeaderTimeout: 5 * time.Second,
 		WriteTimeout:      cfg.Server.WriteTimeout,
 		IdleTimeout:       cfg.Server.IdleTimeout,
 	}
