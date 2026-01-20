@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	mw "github.com/lorrc/service-desk-backend/internal/adapters/primary/http/middleware"
 	"github.com/lorrc/service-desk-backend/internal/adapters/primary/validation"
 	"github.com/lorrc/service-desk-backend/internal/auth"
@@ -17,6 +18,7 @@ import (
 // CommentHandler handles HTTP requests for comments.
 type CommentHandler struct {
 	commentService ports.CommentService
+	userLookup     ports.UserLookupService
 	errorHandler   *ErrorHandler
 	logger         *slog.Logger
 }
@@ -24,11 +26,13 @@ type CommentHandler struct {
 // NewCommentHandler creates a new CommentHandler.
 func NewCommentHandler(
 	commentService ports.CommentService,
+	userLookup ports.UserLookupService,
 	errorHandler *ErrorHandler,
 	logger *slog.Logger,
 ) *CommentHandler {
 	return &CommentHandler{
 		commentService: commentService,
+		userLookup:     userLookup,
 		errorHandler:   errorHandler,
 		logger:         logger.With("handler", "comment"),
 	}
@@ -73,24 +77,32 @@ type CommentDTO struct {
 	ID        string `json:"id"`
 	TicketID  int64  `json:"ticketId"`
 	AuthorID  string `json:"authorId"`
+	Author    *UserInfoDTO `json:"author,omitempty"`
 	Body      string `json:"body"`
 	CreatedAt string `json:"createdAt"`
 }
 
-func toCommentDTO(comment *domain.Comment) CommentDTO {
+func toCommentDTO(comment *domain.Comment, userInfoByID map[uuid.UUID]UserInfoDTO) CommentDTO {
+	var author *UserInfoDTO
+	if userInfo, ok := userInfoByID[comment.AuthorID]; ok {
+		value := userInfo
+		author = &value
+	}
+
 	return CommentDTO{
 		ID:        strconv.FormatInt(comment.ID, 10),
 		TicketID:  comment.TicketID,
 		AuthorID:  comment.AuthorID.String(),
+		Author:    author,
 		Body:      comment.Body,
 		CreatedAt: comment.CreatedAt.Format(time.RFC3339),
 	}
 }
 
-func toCommentDTOs(comments []*domain.Comment) []CommentDTO {
+func toCommentDTOs(comments []*domain.Comment, userInfoByID map[uuid.UUID]UserInfoDTO) []CommentDTO {
 	response := make([]CommentDTO, 0, len(comments))
 	for _, comment := range comments {
-		response = append(response, toCommentDTO(comment))
+		response = append(response, toCommentDTO(comment, userInfoByID))
 	}
 	return response
 }
@@ -139,7 +151,18 @@ func (h *CommentHandler) HandleCreateComment(w http.ResponseWriter, r *http.Requ
 		"user_id", claims.UserID,
 	)
 
-	WriteCreated(w, toCommentDTO(comment))
+	userInfoByID, err := buildUserInfoDTOMap(
+		r.Context(),
+		h.userLookup,
+		claims.OrgID,
+		[]uuid.UUID{comment.AuthorID},
+	)
+	if err != nil {
+		h.errorHandler.Handle(w, r, err)
+		return
+	}
+
+	WriteCreated(w, toCommentDTO(comment, userInfoByID))
 }
 
 // HandleListComments handles requests to list comments for a ticket.
@@ -166,7 +189,22 @@ func (h *CommentHandler) HandleListComments(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	WriteList(w, toCommentDTOs(comments))
+	userIDs := make([]uuid.UUID, 0, len(comments))
+	for _, comment := range comments {
+		userIDs = append(userIDs, comment.AuthorID)
+	}
+	userInfoByID, err := buildUserInfoDTOMap(
+		r.Context(),
+		h.userLookup,
+		claims.OrgID,
+		userIDs,
+	)
+	if err != nil {
+		h.errorHandler.Handle(w, r, err)
+		return
+	}
+
+	WriteList(w, toCommentDTOs(comments, userInfoByID))
 }
 
 // --- Helper methods ---

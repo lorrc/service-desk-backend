@@ -34,6 +34,11 @@ type AdminService interface {
 	GetAnalyticsOverview(ctx context.Context, actorID, orgID uuid.UUID, days int) (*domain.AnalyticsOverview, error)
 }
 
+// UserLookupService provides lightweight user details for display purposes.
+type UserLookupService interface {
+	GetUserInfo(ctx context.Context, orgID uuid.UUID, userIDs []uuid.UUID) (map[uuid.UUID]domain.UserInfo, error)
+}
+
 // CreateTicketParams defines the required input for creating a new ticket.
 type CreateTicketParams struct {
 	Title       string

@@ -135,6 +135,7 @@ func run() error {
 	authService := services.NewAuthService(userRepo, authzRepo, defaultOrgID)
 	authzService := services.NewAuthorizationService(authzRepo)
 	assigneeService := services.NewAssigneeService(userRepo, authzService)
+	userLookupService := services.NewUserLookupService(userRepo)
 	ticketService := services.NewTicketService(ticketRepo, authzService, notifier, eventRepo, txManager)
 	commentService := services.NewCommentService(commentRepo, ticketService, authzService, notifier, eventRepo, txManager)
 	eventService := services.NewEventService(eventRepo, ticketService)
@@ -149,8 +150,8 @@ func run() error {
 	meHandler := httpAdapter.NewMeHandler(authzService, errorHandler, logger)
 	assigneeHandler := httpAdapter.NewAssigneeHandler(assigneeService, errorHandler, logger)
 	adminHandler := httpAdapter.NewAdminHandler(adminService, errorHandler, logger)
-	commentHandler := httpAdapter.NewCommentHandler(commentService, errorHandler, logger)
-	ticketHandler := httpAdapter.NewTicketHandler(ticketService, eventService, commentHandler, errorHandler, logger)
+	commentHandler := httpAdapter.NewCommentHandler(commentService, userLookupService, errorHandler, logger)
+	ticketHandler := httpAdapter.NewTicketHandler(ticketService, eventService, userLookupService, commentHandler, errorHandler, logger)
 	healthHandler := httpAdapter.NewHealthHandler(pool, cfg.App.Version)
 
 	// 7. Setup Router

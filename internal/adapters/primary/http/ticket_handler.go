@@ -25,6 +25,7 @@ const (
 type TicketHandler struct {
 	ticketService  ports.TicketService
 	eventService   ports.EventService
+	userLookup     ports.UserLookupService
 	commentHandler *CommentHandler
 	errorHandler   *ErrorHandler
 	logger         *slog.Logger
@@ -34,6 +35,7 @@ type TicketHandler struct {
 func NewTicketHandler(
 	ticketService ports.TicketService,
 	eventService ports.EventService,
+	userLookup ports.UserLookupService,
 	commentHandler *CommentHandler,
 	errorHandler *ErrorHandler,
 	logger *slog.Logger,
@@ -41,6 +43,7 @@ func NewTicketHandler(
 	return &TicketHandler{
 		ticketService:  ticketService,
 		eventService:   eventService,
+		userLookup:     userLookup,
 		commentHandler: commentHandler,
 		errorHandler:   errorHandler,
 		logger:         logger.With("handler", "ticket"),
@@ -144,17 +147,33 @@ type TicketDTO struct {
 	Status      string  `json:"status"`
 	Priority    string  `json:"priority"`
 	RequesterID string  `json:"requesterId"`
+	Requester   *UserInfoDTO `json:"requester,omitempty"`
 	AssigneeID  *string `json:"assigneeId"`
+	Assignee    *UserInfoDTO `json:"assignee,omitempty"`
 	CreatedAt   string  `json:"createdAt"`
 	UpdatedAt   *string `json:"updatedAt"`
 	ClosedAt    *string `json:"closedAt"`
 }
 
-func toTicketDTO(ticket *domain.Ticket) TicketDTO {
+func toTicketDTO(ticket *domain.Ticket, userInfoByID map[uuid.UUID]UserInfoDTO) TicketDTO {
 	var assigneeID *string
 	if ticket.AssigneeID != nil {
 		value := ticket.AssigneeID.String()
 		assigneeID = &value
+	}
+
+	var requester *UserInfoDTO
+	if userInfo, ok := userInfoByID[ticket.RequesterID]; ok {
+		value := userInfo
+		requester = &value
+	}
+
+	var assignee *UserInfoDTO
+	if ticket.AssigneeID != nil {
+		if userInfo, ok := userInfoByID[*ticket.AssigneeID]; ok {
+			value := userInfo
+			assignee = &value
+		}
 	}
 
 	var updatedAt *string
@@ -176,17 +195,19 @@ func toTicketDTO(ticket *domain.Ticket) TicketDTO {
 		Status:      string(ticket.Status),
 		Priority:    string(ticket.Priority),
 		RequesterID: ticket.RequesterID.String(),
+		Requester:   requester,
 		AssigneeID:  assigneeID,
+		Assignee:    assignee,
 		CreatedAt:   ticket.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:   updatedAt,
 		ClosedAt:    closedAt,
 	}
 }
 
-func toTicketDTOs(tickets []*domain.Ticket) []TicketDTO {
+func toTicketDTOs(tickets []*domain.Ticket, userInfoByID map[uuid.UUID]UserInfoDTO) []TicketDTO {
 	response := make([]TicketDTO, 0, len(tickets))
 	for _, ticket := range tickets {
-		response = append(response, toTicketDTO(ticket))
+		response = append(response, toTicketDTO(ticket, userInfoByID))
 	}
 	return response
 }
@@ -275,8 +296,19 @@ func (h *TicketHandler) HandleListTickets(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	userInfoByID, err := buildUserInfoDTOMap(
+		r.Context(),
+		h.userLookup,
+		claims.OrgID,
+		collectTicketUserIDs(tickets),
+	)
+	if err != nil {
+		h.errorHandler.Handle(w, r, err)
+		return
+	}
+
 	// Use simple pagination (without total count for performance)
-	WritePaginatedSimple(w, toTicketDTOs(tickets), pagination.Limit, pagination.Offset)
+	WritePaginatedSimple(w, toTicketDTOs(tickets, userInfoByID), pagination.Limit, pagination.Offset)
 }
 
 // HandleCreateTicket handles POST /tickets
@@ -315,7 +347,18 @@ func (h *TicketHandler) HandleCreateTicket(w http.ResponseWriter, r *http.Reques
 		"user_id", claims.UserID,
 	)
 
-	WriteCreated(w, toTicketDTO(ticket))
+	userInfoByID, err := buildUserInfoDTOMap(
+		r.Context(),
+		h.userLookup,
+		claims.OrgID,
+		collectTicketUserIDs([]*domain.Ticket{ticket}),
+	)
+	if err != nil {
+		h.errorHandler.Handle(w, r, err)
+		return
+	}
+
+	WriteCreated(w, toTicketDTO(ticket, userInfoByID))
 }
 
 // HandleGetTicket handles GET /tickets/{ticketID}
@@ -337,7 +380,18 @@ func (h *TicketHandler) HandleGetTicket(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	WriteJSON(w, http.StatusOK, toTicketDTO(ticket))
+	userInfoByID, err := buildUserInfoDTOMap(
+		r.Context(),
+		h.userLookup,
+		claims.OrgID,
+		collectTicketUserIDs([]*domain.Ticket{ticket}),
+	)
+	if err != nil {
+		h.errorHandler.Handle(w, r, err)
+		return
+	}
+
+	WriteJSON(w, http.StatusOK, toTicketDTO(ticket, userInfoByID))
 }
 
 // HandleUpdateTicketStatus handles PATCH /tickets/{ticketID}/status
@@ -382,7 +436,18 @@ func (h *TicketHandler) HandleUpdateTicketStatus(w http.ResponseWriter, r *http.
 		"user_id", claims.UserID,
 	)
 
-	WriteJSON(w, http.StatusOK, toTicketDTO(ticket))
+	userInfoByID, err := buildUserInfoDTOMap(
+		r.Context(),
+		h.userLookup,
+		claims.OrgID,
+		collectTicketUserIDs([]*domain.Ticket{ticket}),
+	)
+	if err != nil {
+		h.errorHandler.Handle(w, r, err)
+		return
+	}
+
+	WriteJSON(w, http.StatusOK, toTicketDTO(ticket, userInfoByID))
 }
 
 // HandleAssignTicket handles PATCH /tickets/{ticketID}/assignee
@@ -434,7 +499,18 @@ func (h *TicketHandler) HandleAssignTicket(w http.ResponseWriter, r *http.Reques
 		"user_id", claims.UserID,
 	)
 
-	WriteJSON(w, http.StatusOK, toTicketDTO(ticket))
+	userInfoByID, err := buildUserInfoDTOMap(
+		r.Context(),
+		h.userLookup,
+		claims.OrgID,
+		collectTicketUserIDs([]*domain.Ticket{ticket}),
+	)
+	if err != nil {
+		h.errorHandler.Handle(w, r, err)
+		return
+	}
+
+	WriteJSON(w, http.StatusOK, toTicketDTO(ticket, userInfoByID))
 }
 
 // TicketEventsResponse defines the JSON response for ticket events.
@@ -546,4 +622,15 @@ func (h *TicketHandler) parseEventQuery(r *http.Request) (int64, int, error) {
 	}
 
 	return afterID, limit, nil
+}
+
+func collectTicketUserIDs(tickets []*domain.Ticket) []uuid.UUID {
+	userIDs := make([]uuid.UUID, 0, len(tickets)*2)
+	for _, ticket := range tickets {
+		userIDs = append(userIDs, ticket.RequesterID)
+		if ticket.AssigneeID != nil {
+			userIDs = append(userIDs, *ticket.AssigneeID)
+		}
+	}
+	return userIDs
 }
