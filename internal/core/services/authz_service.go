@@ -24,7 +24,7 @@ func NewAuthorizationService(authRepo ports.AuthorizationRepository) ports.Autho
 	}
 }
 
-// Can checks if a user has a specific permission.
+// Can check if a user has a specific permission.
 func (s *AuthorizationService) Can(ctx context.Context, userID uuid.UUID, permission string) (bool, error) {
 	userPermissions, err := s.ensurePermissions(ctx, userID)
 	if err != nil {
