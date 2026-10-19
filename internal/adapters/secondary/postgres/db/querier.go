@@ -12,21 +12,22 @@ import (
 
 type Querier interface {
 	AssignRole(ctx context.Context, arg AssignRoleParams) (string, error)
-	CountUsers(ctx context.Context) (int64, error)
 	CreateComment(ctx context.Context, arg CreateCommentParams) (Comment, error)
 	CreateTicket(ctx context.Context, arg CreateTicketParams) (Ticket, error)
 	CreateTicketEvent(ctx context.Context, arg CreateTicketEventParams) (TicketEvent, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
-	GetTicketByID(ctx context.Context, id int64) (Ticket, error)
+	GetTicketByID(ctx context.Context, arg GetTicketByIDParams) (Ticket, error)
+	GetTicketCounts(ctx context.Context, arg GetTicketCountsParams) (GetTicketCountsRow, error)
+	GetTicketForUpdate(ctx context.Context, arg GetTicketForUpdateParams) (Ticket, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
+	GetUserInfo(ctx context.Context, arg GetUserInfoParams) ([]GetUserInfoRow, error)
 	GetUserPermissions(ctx context.Context, userID pgtype.UUID) ([]string, error)
 	ListCommentsByTicketID(ctx context.Context, ticketID int64) ([]Comment, error)
 	ListTicketEvents(ctx context.Context, arg ListTicketEventsParams) ([]TicketEvent, error)
-	ListTicketsByRequesterPaginated(ctx context.Context, arg ListTicketsByRequesterPaginatedParams) ([]Ticket, error)
 	ListTicketsPaginated(ctx context.Context, arg ListTicketsPaginatedParams) ([]Ticket, error)
-	SetUserRole(ctx context.Context, arg SetUserRoleParams) (string, error)
 	UpdateTicket(ctx context.Context, arg UpdateTicketParams) (Ticket, error)
+	ValidateSession(ctx context.Context, arg ValidateSessionParams) (bool, error)
 }
 
 var _ Querier = (*Queries)(nil)

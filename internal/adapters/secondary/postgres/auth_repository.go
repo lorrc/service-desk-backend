@@ -2,9 +2,11 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/lorrc/service-desk-backend/internal/adapters/secondary/postgres/db"
@@ -14,8 +16,7 @@ import (
 
 // AuthorizationRepository handles database operations for RBAC.
 type AuthorizationRepository struct {
-	q    db.Querier
-	dbtx db.DBTX
+	pool *pgxpool.Pool
 }
 
 // Ensure implementation matches the interface.
@@ -24,15 +25,14 @@ var _ ports.AuthorizationRepository = (*AuthorizationRepository)(nil)
 // NewAuthorizationRepository creates a new repository for authorization queries.
 func NewAuthorizationRepository(pool *pgxpool.Pool) ports.AuthorizationRepository {
 	return &AuthorizationRepository{
-		q:    db.New(pool),
-		dbtx: pool,
+		pool: pool,
 	}
 }
 
 // GetUserPermissions fetches all distinct permissions for a given user ID.
 func (r *AuthorizationRepository) GetUserPermissions(ctx context.Context, userID uuid.UUID) ([]string, error) {
 	pgUUID := pgtype.UUID{Bytes: userID, Valid: true}
-	permissions, err := r.q.GetUserPermissions(ctx, pgUUID)
+	permissions, err := db.New(GetDBTX(ctx, r.pool)).GetUserPermissions(ctx, pgUUID)
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +47,7 @@ func (r *AuthorizationRepository) AssignRole(ctx context.Context, userID uuid.UU
 	}
 
 	for attempt := 0; attempt < 2; attempt++ {
-		status, err := r.q.AssignRole(ctx, params)
+		status, err := db.New(GetDBTX(ctx, r.pool)).AssignRole(ctx, params)
 		if err != nil {
 			return err
 		}
@@ -79,33 +79,25 @@ func (r *AuthorizationRepository) AssignRole(ctx context.Context, userID uuid.UU
 
 // SetUserRole replaces any existing roles for a user with the provided role.
 func (r *AuthorizationRepository) SetUserRole(ctx context.Context, userID uuid.UUID, roleName string) error {
-	params := db.SetUserRoleParams{
-		UserID:   pgtype.UUID{Bytes: userID, Valid: true},
-		RoleName: roleName,
-	}
-
-	for attempt := 0; attempt < 2; attempt++ {
-		status, err := r.q.SetUserRole(ctx, params)
-		if err != nil {
+	return NewTransactionManager(r.pool).WithTransaction(ctx, func(txCtx context.Context) error {
+		conn := GetDBTX(txCtx, r.pool)
+		var roleID int32
+		if err := conn.QueryRow(txCtx, "SELECT id FROM roles WHERE name = $1", roleName).Scan(&roleID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return apperrors.ErrRoleNotFound
+			}
 			return err
 		}
-		switch status {
-		case "assigned":
-			return nil
-		case "role_not_found":
-			if attempt == 0 {
-				if err := r.ensureRBACDefaults(ctx); err != nil {
-					return err
-				}
-				continue
-			}
-			return apperrors.ErrRoleNotFound
-		default:
-			return fmt.Errorf("unexpected role update status: %s", status)
+		var id uuid.UUID
+		if err := conn.QueryRow(txCtx, "SELECT id FROM users WHERE id = $1 FOR UPDATE", userID).Scan(&id); err != nil {
+			return err
 		}
-	}
-
-	return apperrors.ErrRoleNotFound
+		if _, err := conn.Exec(txCtx, "DELETE FROM user_roles WHERE user_id = $1", userID); err != nil {
+			return err
+		}
+		_, err := conn.Exec(txCtx, "INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)", userID, roleID)
+		return err
+	})
 }
 
 func (r *AuthorizationRepository) EnsureRBACDefaults(ctx context.Context) error {
@@ -147,7 +139,7 @@ func (r *AuthorizationRepository) ensureRBACDefaults(ctx context.Context) error 
 	}
 
 	for _, stmt := range statements {
-		if _, err := r.dbtx.Exec(ctx, stmt); err != nil {
+		if _, err := GetDBTX(ctx, r.pool).Exec(ctx, stmt); err != nil {
 			return fmt.Errorf("seed rbac defaults: %w", err)
 		}
 	}

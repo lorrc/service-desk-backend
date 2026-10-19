@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware" // Import standard middleware
-	"github.com/go-chi/cors"              // FIX: Import CORS
+
+	"github.com/go-chi/cors" // FIX: Import CORS
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -23,7 +23,7 @@ import (
 	"github.com/lorrc/service-desk-backend/internal/adapters/secondary/postgres"
 	"github.com/lorrc/service-desk-backend/internal/auth"
 	"github.com/lorrc/service-desk-backend/internal/config"
-	apperrors "github.com/lorrc/service-desk-backend/internal/core/errors"
+
 	"github.com/lorrc/service-desk-backend/internal/core/ports" // Assuming interface exists here
 	"github.com/lorrc/service-desk-backend/internal/core/services"
 	"github.com/lorrc/service-desk-backend/internal/infrastructure/logging"
@@ -103,6 +103,8 @@ func run() error {
 			CleanupInterval:   time.Minute,
 			TTL:               5 * time.Minute,
 		})
+		defer generalRateLimiter.Close()
+		defer authRateLimiter.Close()
 	}
 
 	// 6. Dependency Injection
@@ -132,11 +134,11 @@ func run() error {
 		notifier = email.NewMockSMTPNotifier(userRepo)
 	}
 
-	authService := services.NewAuthService(userRepo, authzRepo, defaultOrgID)
+	authService := services.NewAuthService(userRepo, authzRepo, txManager, defaultOrgID)
 	authzService := services.NewAuthorizationService(authzRepo)
 	assigneeService := services.NewAssigneeService(userRepo, authzService)
 	userLookupService := services.NewUserLookupService(userRepo)
-	ticketService := services.NewTicketService(ticketRepo, authzService, notifier, eventRepo, txManager)
+	ticketService := services.NewTicketService(ticketRepo, authzService, notifier, eventRepo, txManager, userRepo)
 	commentService := services.NewCommentService(commentRepo, ticketService, authzService, notifier, eventRepo, txManager)
 	eventService := services.NewEventService(eventRepo, ticketService)
 	adminService := services.NewAdminService(userRepo, authzRepo, authzService, analyticsRepo)
@@ -157,7 +159,7 @@ func run() error {
 	// 7. Setup Router
 	r := chi.NewRouter()
 
-	r.Use(middleware.RealIP) // 1. Important for Rate Limiting behind proxy
+	r.Use(mw.ClientIPMiddleware(cfg.Server.TrustedProxyCIDRs))
 	r.Use(mw.RequestID)
 	r.Use(mw.RequestLogger(logger))
 	r.Use(mw.RecoveryLogger(logger))
@@ -186,7 +188,7 @@ func run() error {
 		})
 
 		r.Group(func(r chi.Router) {
-			r.Use(mw.JWTMiddleware(tokenManager))
+			r.Use(mw.JWTMiddleware(tokenManager, userRepo))
 			r.Route("/me", meHandler.RegisterRoutes)
 			r.Route("/assignees", assigneeHandler.RegisterRoutes)
 			r.Route("/admin", adminHandler.RegisterRoutes)
@@ -244,26 +246,10 @@ func seedAdminUser(ctx context.Context, cfg config.AdminConfig, authService port
 
 	logger.Info("attempting to seed admin user", "email", cfg.Email)
 
-	// A simple way to check for existence is to try to log in.
-	// This avoids needing a GetUserByEmail method on the auth service.
-	_, err := authService.Login(ctx, cfg.Email, cfg.Password)
-	if err == nil {
-		logger.Info("admin user already exists", "email", cfg.Email)
-		return nil // User already exists
-	}
-
-	// If the error is anything other than invalid credentials, it's a real problem.
-	if !errors.Is(err, apperrors.ErrInvalidCredentials) && !errors.Is(err, apperrors.ErrUserNotFound) {
-		return fmt.Errorf("failed during admin existence check: %w", err)
-	}
-
-	// User does not exist, so create them.
 	fullName := fmt.Sprintf("%s %s", cfg.FirstName, cfg.LastName)
-	_, err = authService.Register(ctx, fullName, cfg.Email, cfg.Password, "admin", uuid.Nil)
-	if err != nil {
-		return fmt.Errorf("failed to register admin user: %w", err)
+	if err := authService.BootstrapAdmin(ctx, fullName, cfg.Email, cfg.Password); err != nil {
+		return fmt.Errorf("bootstrap admin: %w", err)
 	}
-
-	logger.Info("successfully seeded admin user", "email", cfg.Email)
+	logger.Info("admin user provisioned", "email", cfg.Email)
 	return nil
 }

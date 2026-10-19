@@ -10,8 +10,9 @@ import (
 
 // Claims defines the structured data we store in the JWT
 type Claims struct {
-	UserID uuid.UUID `json:"user_id"`
-	OrgID  uuid.UUID `json:"org_id"`
+	UserID         uuid.UUID `json:"user_id"`
+	OrgID          uuid.UUID `json:"org_id"`
+	SessionVersion int64     `json:"session_version"`
 	jwt.RegisteredClaims
 }
 
@@ -28,7 +29,10 @@ func NewTokenManager(secret string, accessTTL time.Duration) *TokenManager {
 }
 
 // GenerateToken creates a new JWT access token
-func (tm *TokenManager) GenerateToken(userID, orgID uuid.UUID) (string, error) {
+func (tm *TokenManager) GenerateToken(userID, orgID uuid.UUID, sessionVersion int64) (string, error) {
+	if userID == uuid.Nil || orgID == uuid.Nil || sessionVersion < 1 {
+		return "", errors.New("invalid session identity")
+	}
 	ttl := tm.accessTTL
 	if ttl <= 0 {
 		ttl = time.Hour
@@ -36,11 +40,13 @@ func (tm *TokenManager) GenerateToken(userID, orgID uuid.UUID) (string, error) {
 
 	expirationTime := time.Now().Add(ttl)
 	claims := &Claims{
-		UserID: userID,
-		OrgID:  orgID,
+		UserID:         userID,
+		OrgID:          orgID,
+		SessionVersion: sessionVersion,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(expirationTime),
 			Subject:   userID.String(),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -55,13 +61,13 @@ func (tm *TokenManager) ValidateToken(tokenString string) (*Claims, error) {
 			return nil, errors.New("unexpected signing method")
 		}
 		return tm.secretKey, nil
-	})
+	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}), jwt.WithExpirationRequired())
 
 	if err != nil {
 		return nil, err
 	}
 
-	if !token.Valid {
+	if !token.Valid || claims.UserID == uuid.Nil || claims.OrgID == uuid.Nil || claims.SessionVersion < 1 {
 		return nil, errors.New("invalid token")
 	}
 

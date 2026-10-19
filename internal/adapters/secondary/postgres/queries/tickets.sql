@@ -4,55 +4,44 @@ VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
 -- name: GetTicketByID :one
-SELECT * FROM tickets
-WHERE id = $1 LIMIT 1;
+SELECT t.* FROM tickets t
+JOIN users u ON u.id = t.requester_id
+WHERE t.id = $1 AND u.organization_id = $2;
+
+-- name: GetTicketForUpdate :one
+SELECT t.* FROM tickets t
+JOIN users u ON u.id = t.requester_id
+WHERE t.id = $1 AND u.organization_id = $2
+FOR UPDATE OF t;
 
 -- name: UpdateTicket :one
-UPDATE tickets
-SET
-    status = $2,
-    assignee_id = $3,
-    updated_at = $4,
-    closed_at = $5
-WHERE id = $1
-RETURNING *;
+UPDATE tickets t
+SET status = $2, assignee_id = $3, updated_at = $4, closed_at = $5
+FROM users u
+WHERE t.id = $1 AND u.id = t.requester_id AND u.organization_id = $6
+RETURNING t.*;
 
 -- name: ListTicketsPaginated :many
-SELECT * FROM tickets
-WHERE
-    (status = sqlc.narg('status') OR sqlc.narg('status') IS NULL)
-  AND
-    (priority = sqlc.narg('priority') OR sqlc.narg('priority') IS NULL)
-  AND
-    (
-      (sqlc.narg('unassigned') = TRUE AND assignee_id IS NULL)
-      OR (sqlc.narg('unassigned') IS NULL AND (assignee_id = sqlc.narg('assignee_id') OR sqlc.narg('assignee_id') IS NULL))
-    )
-  AND
-    (created_at >= sqlc.narg('created_from') OR sqlc.narg('created_from') IS NULL)
-  AND
-    (created_at < sqlc.narg('created_to') OR sqlc.narg('created_to') IS NULL)
-ORDER BY created_at DESC
-LIMIT sqlc.arg('limit')
-    OFFSET sqlc.arg('offset');
+SELECT t.* FROM tickets t
+JOIN users u ON u.id = t.requester_id
+WHERE u.organization_id = sqlc.arg('organization_id')
+  AND (t.requester_id = sqlc.narg('requester_id') OR sqlc.narg('requester_id') IS NULL)
+  AND (t.status = sqlc.narg('status') OR sqlc.narg('status') IS NULL)
+  AND (t.priority = sqlc.narg('priority') OR sqlc.narg('priority') IS NULL)
+  AND (NOT sqlc.arg('unassigned')::boolean OR t.assignee_id IS NULL)
+  AND (t.assignee_id = sqlc.narg('assignee_id') OR sqlc.narg('assignee_id') IS NULL)
+  AND (t.created_at >= sqlc.narg('created_from') OR sqlc.narg('created_from') IS NULL)
+  AND (t.created_at < sqlc.narg('created_to') OR sqlc.narg('created_to') IS NULL)
+ORDER BY t.created_at DESC, t.id DESC
+LIMIT sqlc.arg('limit') OFFSET sqlc.arg('offset');
 
--- name: ListTicketsByRequesterPaginated :many
-SELECT * FROM tickets
-WHERE
-    requester_id = sqlc.arg('requester_id')
-  AND
-    (status = sqlc.narg('status') OR sqlc.narg('status') IS NULL)
-  AND
-    (priority = sqlc.narg('priority') OR sqlc.narg('priority') IS NULL)
-  AND
-    (
-      (sqlc.narg('unassigned') = TRUE AND assignee_id IS NULL)
-      OR (sqlc.narg('unassigned') IS NULL AND (assignee_id = sqlc.narg('assignee_id') OR sqlc.narg('assignee_id') IS NULL))
-    )
-  AND
-    (created_at >= sqlc.narg('created_from') OR sqlc.narg('created_from') IS NULL)
-  AND
-    (created_at < sqlc.narg('created_to') OR sqlc.narg('created_to') IS NULL)
-ORDER BY created_at DESC
-LIMIT sqlc.arg('limit')
-    OFFSET sqlc.arg('offset');
+-- name: GetTicketCounts :one
+SELECT
+  COUNT(*) FILTER (WHERE t.status = 'OPEN') AS open,
+  COUNT(*) FILTER (WHERE t.status = 'IN_PROGRESS') AS in_progress,
+  COUNT(*) FILTER (WHERE t.status = 'CLOSED') AS closed,
+  COUNT(*) FILTER (WHERE t.priority = 'HIGH' AND t.status <> 'CLOSED') AS high_priority
+FROM tickets t
+JOIN users u ON u.id = t.requester_id
+WHERE u.organization_id = sqlc.arg('organization_id')
+  AND (t.requester_id = sqlc.narg('requester_id') OR sqlc.narg('requester_id') IS NULL);

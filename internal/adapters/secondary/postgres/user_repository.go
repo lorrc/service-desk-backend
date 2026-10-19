@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,7 +19,6 @@ import (
 
 // UserRepository is the postgres adapter for user persistence.
 type UserRepository struct {
-	q    db.Querier
 	pool *pgxpool.Pool
 }
 
@@ -27,7 +27,6 @@ var _ ports.UserRepository = (*UserRepository)(nil)
 // NewUserRepository creates a new user repository.
 func NewUserRepository(pool *pgxpool.Pool) ports.UserRepository {
 	return &UserRepository{
-		q:    db.New(pool),
 		pool: pool,
 	}
 }
@@ -43,6 +42,7 @@ func mapDBUserToDomain(dbUser db.User) *domain.User {
 		CreatedAt:      dbUser.CreatedAt.Time,
 		IsActive:       dbUser.IsActive,
 		LastActiveAt:   toTimePtr(dbUser.LastActiveAt),
+		SessionVersion: dbUser.SessionVersion,
 	}
 }
 
@@ -63,7 +63,7 @@ func (r *UserRepository) Create(ctx context.Context, user *domain.User) (*domain
 		HashedPassword: user.HashedPassword,
 	}
 
-	createdUser, err := r.q.CreateUser(ctx, params)
+	createdUser, err := db.New(GetDBTX(ctx, r.pool)).CreateUser(ctx, params)
 	if err != nil {
 		// FIX: Check for Postgres Unique Violation (Code "23505")
 		var pgErr *pgconn.PgError
@@ -78,7 +78,7 @@ func (r *UserRepository) Create(ctx context.Context, user *domain.User) (*domain
 
 // GetByEmail retrieves a user by email address.
 func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*domain.User, error) {
-	dbUser, err := r.q.GetUserByEmail(ctx, email)
+	dbUser, err := db.New(GetDBTX(ctx, r.pool)).GetUserByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, apperrors.ErrUserNotFound
@@ -90,7 +90,7 @@ func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*domain.
 
 // GetByID retrieves a user by their ID.
 func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error) {
-	dbUser, err := r.q.GetUserByID(ctx, pgtype.UUID{Bytes: id, Valid: true})
+	dbUser, err := db.New(GetDBTX(ctx, r.pool)).GetUserByID(ctx, pgtype.UUID{Bytes: id, Valid: true})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, apperrors.ErrUserNotFound
@@ -100,9 +100,41 @@ func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Use
 	return mapDBUserToDomain(dbUser), nil
 }
 
-// CountUsers returns the total number of users.
-func (r *UserRepository) CountUsers(ctx context.Context) (int64, error) {
-	return r.q.CountUsers(ctx)
+// LockOrganization serializes organization bootstrap in the current transaction.
+func (r *UserRepository) LockOrganization(ctx context.Context, orgID uuid.UUID) error {
+	if _, ok := TxFromContext(ctx); !ok {
+		return fmt.Errorf("organization lock requires a transaction")
+	}
+	var id uuid.UUID
+	return GetDBTX(ctx, r.pool).QueryRow(ctx, "SELECT id FROM organizations WHERE id = $1 FOR UPDATE", orgID).Scan(&id)
+}
+
+// ValidateSession rejects disabled accounts, stale tokens and mismatched organizations.
+func (r *UserRepository) ValidateSession(ctx context.Context, userID, orgID uuid.UUID, version int64) (bool, error) {
+	return db.New(GetDBTX(ctx, r.pool)).ValidateSession(ctx, db.ValidateSessionParams{
+		ID: pgtype.UUID{Bytes: userID, Valid: true}, OrganizationID: pgtype.UUID{Bytes: orgID, Valid: true}, SessionVersion: version,
+	})
+}
+
+// GetUserInfo fetches all requested display identities in one organization-scoped query.
+func (r *UserRepository) GetUserInfo(ctx context.Context, orgID uuid.UUID, userIDs []uuid.UUID) (map[uuid.UUID]domain.UserInfo, error) {
+	result := make(map[uuid.UUID]domain.UserInfo)
+	if len(userIDs) == 0 {
+		return result, nil
+	}
+	ids := make([]pgtype.UUID, 0, len(userIDs))
+	for _, id := range userIDs {
+		ids = append(ids, pgtype.UUID{Bytes: id, Valid: true})
+	}
+	rows, err := db.New(GetDBTX(ctx, r.pool)).GetUserInfo(ctx, db.GetUserInfoParams{OrganizationID: pgtype.UUID{Bytes: orgID, Valid: true}, Column2: ids})
+	if err != nil {
+		return nil, fmt.Errorf("get user info: %w", err)
+	}
+	for _, row := range rows {
+		id := uuid.UUID(row.ID.Bytes)
+		result[id] = domain.UserInfo{ID: id, FullName: row.FullName, Email: row.Email}
+	}
+	return result, nil
 }
 
 // ListAssignableUsers returns users eligible for ticket assignment in the same org.
@@ -225,7 +257,7 @@ ORDER BY u.full_name, u.email
 }
 
 func (r *UserRepository) SetActive(ctx context.Context, userID uuid.UUID, isActive bool) error {
-	tag, err := r.pool.Exec(ctx, "UPDATE users SET is_active = $2 WHERE id = $1", pgtype.UUID{Bytes: userID, Valid: true}, isActive)
+	tag, err := GetDBTX(ctx, r.pool).Exec(ctx, "UPDATE users SET is_active = $2, session_version = session_version + CASE WHEN is_active IS DISTINCT FROM $2 THEN 1 ELSE 0 END WHERE id = $1", pgtype.UUID{Bytes: userID, Valid: true}, isActive)
 	if err != nil {
 		return err
 	}
@@ -236,7 +268,7 @@ func (r *UserRepository) SetActive(ctx context.Context, userID uuid.UUID, isActi
 }
 
 func (r *UserRepository) UpdatePassword(ctx context.Context, userID uuid.UUID, hashedPassword string) error {
-	tag, err := r.pool.Exec(ctx, "UPDATE users SET hashed_password = $2 WHERE id = $1", pgtype.UUID{Bytes: userID, Valid: true}, hashedPassword)
+	tag, err := GetDBTX(ctx, r.pool).Exec(ctx, "UPDATE users SET hashed_password = $2, session_version = session_version + 1 WHERE id = $1", pgtype.UUID{Bytes: userID, Valid: true}, hashedPassword)
 	if err != nil {
 		return err
 	}
@@ -247,7 +279,7 @@ func (r *UserRepository) UpdatePassword(ctx context.Context, userID uuid.UUID, h
 }
 
 func (r *UserRepository) UpdateLastActive(ctx context.Context, userID uuid.UUID, at time.Time) error {
-	tag, err := r.pool.Exec(ctx, "UPDATE users SET last_active_at = $2 WHERE id = $1", pgtype.UUID{Bytes: userID, Valid: true}, pgtype.Timestamptz{Time: at.UTC(), Valid: true})
+	tag, err := GetDBTX(ctx, r.pool).Exec(ctx, "UPDATE users SET last_active_at = $2 WHERE id = $1", pgtype.UUID{Bytes: userID, Valid: true}, pgtype.Timestamptz{Time: at.UTC(), Valid: true})
 	if err != nil {
 		return err
 	}

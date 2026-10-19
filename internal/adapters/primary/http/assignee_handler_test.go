@@ -31,7 +31,7 @@ func TestAssigneeList(t *testing.T) {
 	authRepo := pgadapter.NewAuthorizationRepository(testPool)
 	userRepo := pgadapter.NewUserRepository(testPool)
 	defaultOrgID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
-	authService := services.NewAuthService(userRepo, authRepo, defaultOrgID)
+	authService := services.NewAuthService(userRepo, authRepo, pgadapter.NewTransactionManager(testPool), defaultOrgID)
 
 	adminEmail := uuid.NewString() + "@example.com"
 	adminUser, err := authService.Register(ctx, "Admin User", adminEmail, "Password1", "admin", uuid.Nil)
@@ -46,7 +46,7 @@ func TestAssigneeList(t *testing.T) {
 	require.NoError(t, err)
 
 	router, tokenManager := newAssigneeRouter()
-	token, err := tokenManager.GenerateToken(adminUser.ID, adminUser.OrganizationID)
+	token, err := tokenManager.GenerateToken(adminUser.ID, adminUser.OrganizationID, adminUser.SessionVersion)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(stdhttp.MethodGet, "/assignees", nil)
@@ -72,14 +72,14 @@ func TestAssigneeList_Forbidden(t *testing.T) {
 	authRepo := pgadapter.NewAuthorizationRepository(testPool)
 	userRepo := pgadapter.NewUserRepository(testPool)
 	defaultOrgID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
-	authService := services.NewAuthService(userRepo, authRepo, defaultOrgID)
+	authService := services.NewAuthService(userRepo, authRepo, pgadapter.NewTransactionManager(testPool), defaultOrgID)
 
 	customerEmail := uuid.NewString() + "@example.com"
 	customerUser, err := authService.Register(ctx, "Customer User", customerEmail, "Password1", "customer", uuid.Nil)
 	require.NoError(t, err)
 
 	router, tokenManager := newAssigneeRouter()
-	token, err := tokenManager.GenerateToken(customerUser.ID, customerUser.OrganizationID)
+	token, err := tokenManager.GenerateToken(customerUser.ID, customerUser.OrganizationID, customerUser.SessionVersion)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(stdhttp.MethodGet, "/assignees", nil)
@@ -101,7 +101,7 @@ func newAssigneeRouter() (*chi.Mux, *auth.TokenManager) {
 	tokenManager := auth.NewTokenManager("test-secret", time.Hour)
 
 	router := chi.NewRouter()
-	router.Use(mw.JWTMiddleware(tokenManager))
+	router.Use(mw.JWTMiddleware(tokenManager, pgadapter.NewUserRepository(testPool)))
 	router.Route("/assignees", handler.RegisterRoutes)
 
 	return router, tokenManager

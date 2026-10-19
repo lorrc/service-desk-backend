@@ -24,6 +24,7 @@ func (stubTransactionManager) WithTransaction(ctx context.Context, fn func(conte
 func TestTicketService_CreateTicket(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.New()
+	orgID := uuid.New()
 
 	t.Run("success", func(t *testing.T) {
 		mockRepo := mocks.NewMockTicketRepository()
@@ -32,7 +33,7 @@ func TestTicketService_CreateTicket(t *testing.T) {
 		mockEventRepo := mocks.NewMockTicketEventRepository()
 		txManager := stubTransactionManager{}
 
-		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockEventRepo, txManager)
+		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockEventRepo, txManager, ticketTestUserRepo(ctx, userID, orgID))
 
 		// Setup expectations
 		mockAuthz.On("Can", ctx, userID, "tickets:create").Return(true, nil)
@@ -49,10 +50,11 @@ func TestTicketService_CreateTicket(t *testing.T) {
 			Return(&domain.Event{ID: 1}, nil)
 
 		params := ports.CreateTicketParams{
-			Title:       "Test Ticket",
-			Description: "Test Description",
-			Priority:    domain.PriorityMedium,
-			RequesterID: userID,
+			OrganizationID: orgID,
+			Title:          "Test Ticket",
+			Description:    "Test Description",
+			Priority:       domain.PriorityMedium,
+			RequesterID:    userID,
 		}
 
 		ticket, err := svc.CreateTicket(ctx, params)
@@ -75,15 +77,16 @@ func TestTicketService_CreateTicket(t *testing.T) {
 		mockEventRepo := mocks.NewMockTicketEventRepository()
 		txManager := stubTransactionManager{}
 
-		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockEventRepo, txManager)
+		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockEventRepo, txManager, ticketTestUserRepo(ctx, userID, orgID))
 
 		mockAuthz.On("Can", ctx, userID, "tickets:create").Return(false, nil)
 
 		params := ports.CreateTicketParams{
-			Title:       "Test Ticket",
-			Description: "Test Description",
-			Priority:    domain.PriorityMedium,
-			RequesterID: userID,
+			OrganizationID: orgID,
+			Title:          "Test Ticket",
+			Description:    "Test Description",
+			Priority:       domain.PriorityMedium,
+			RequesterID:    userID,
 		}
 
 		ticket, err := svc.CreateTicket(ctx, params)
@@ -100,15 +103,16 @@ func TestTicketService_CreateTicket(t *testing.T) {
 		mockEventRepo := mocks.NewMockTicketEventRepository()
 		txManager := stubTransactionManager{}
 
-		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockEventRepo, txManager)
+		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockEventRepo, txManager, ticketTestUserRepo(ctx, userID, orgID))
 
 		mockAuthz.On("Can", ctx, userID, "tickets:create").Return(true, nil)
 
 		params := ports.CreateTicketParams{
-			Title:       "", // Empty title
-			Description: "Test Description",
-			Priority:    domain.PriorityMedium,
-			RequesterID: userID,
+			OrganizationID: orgID,
+			Title:          "", // Empty title
+			Description:    "Test Description",
+			Priority:       domain.PriorityMedium,
+			RequesterID:    userID,
 		}
 
 		ticket, err := svc.CreateTicket(ctx, params)
@@ -122,6 +126,7 @@ func TestTicketService_CreateTicket(t *testing.T) {
 func TestTicketService_GetTicket(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.New()
+	orgID := uuid.New()
 	ticketID := int64(1)
 
 	t.Run("owner can access own ticket", func(t *testing.T) {
@@ -131,7 +136,7 @@ func TestTicketService_GetTicket(t *testing.T) {
 		mockEventRepo := mocks.NewMockTicketEventRepository()
 		txManager := stubTransactionManager{}
 
-		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockEventRepo, txManager)
+		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockEventRepo, txManager, ticketTestUserRepo(ctx, userID, orgID))
 
 		expectedTicket := &domain.Ticket{
 			ID:          ticketID,
@@ -141,9 +146,9 @@ func TestTicketService_GetTicket(t *testing.T) {
 		}
 
 		mockAuthz.On("Can", ctx, userID, "tickets:read").Return(true, nil)
-		mockRepo.On("GetByID", ctx, ticketID).Return(expectedTicket, nil)
+		mockRepo.On("GetByID", ctx, ticketID, orgID).Return(expectedTicket, nil)
 
-		ticket, err := svc.GetTicket(ctx, ticketID, userID)
+		ticket, err := svc.GetTicket(ctx, ticketID, userID, orgID)
 
 		require.NoError(t, err)
 		assert.Equal(t, expectedTicket, ticket)
@@ -156,7 +161,7 @@ func TestTicketService_GetTicket(t *testing.T) {
 		mockEventRepo := mocks.NewMockTicketEventRepository()
 		txManager := stubTransactionManager{}
 
-		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockEventRepo, txManager)
+		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockEventRepo, txManager, ticketTestUserRepo(ctx, userID, orgID))
 
 		otherUserID := uuid.New()
 		expectedTicket := &domain.Ticket{
@@ -167,10 +172,10 @@ func TestTicketService_GetTicket(t *testing.T) {
 		}
 
 		mockAuthz.On("Can", ctx, userID, "tickets:read").Return(true, nil)
-		mockRepo.On("GetByID", ctx, ticketID).Return(expectedTicket, nil)
+		mockRepo.On("GetByID", ctx, ticketID, orgID).Return(expectedTicket, nil)
 		mockAuthz.On("Can", ctx, userID, "tickets:read:all").Return(false, nil)
 
-		ticket, err := svc.GetTicket(ctx, ticketID, userID)
+		ticket, err := svc.GetTicket(ctx, ticketID, userID, orgID)
 
 		assert.Nil(t, ticket)
 		assert.ErrorIs(t, err, apperrors.ErrForbidden)
@@ -183,7 +188,7 @@ func TestTicketService_GetTicket(t *testing.T) {
 		mockEventRepo := mocks.NewMockTicketEventRepository()
 		txManager := stubTransactionManager{}
 
-		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockEventRepo, txManager)
+		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockEventRepo, txManager, ticketTestUserRepo(ctx, userID, orgID))
 
 		otherUserID := uuid.New()
 		expectedTicket := &domain.Ticket{
@@ -194,10 +199,10 @@ func TestTicketService_GetTicket(t *testing.T) {
 		}
 
 		mockAuthz.On("Can", ctx, userID, "tickets:read").Return(true, nil)
-		mockRepo.On("GetByID", ctx, ticketID).Return(expectedTicket, nil)
+		mockRepo.On("GetByID", ctx, ticketID, orgID).Return(expectedTicket, nil)
 		mockAuthz.On("Can", ctx, userID, "tickets:read:all").Return(true, nil)
 
-		ticket, err := svc.GetTicket(ctx, ticketID, userID)
+		ticket, err := svc.GetTicket(ctx, ticketID, userID, orgID)
 
 		require.NoError(t, err)
 		assert.Equal(t, expectedTicket, ticket)
@@ -210,12 +215,12 @@ func TestTicketService_GetTicket(t *testing.T) {
 		mockEventRepo := mocks.NewMockTicketEventRepository()
 		txManager := stubTransactionManager{}
 
-		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockEventRepo, txManager)
+		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockEventRepo, txManager, ticketTestUserRepo(ctx, userID, orgID))
 
 		mockAuthz.On("Can", ctx, userID, "tickets:read").Return(true, nil)
-		mockRepo.On("GetByID", ctx, ticketID).Return(nil, apperrors.ErrTicketNotFound)
+		mockRepo.On("GetByID", ctx, ticketID, orgID).Return(nil, apperrors.ErrTicketNotFound)
 
-		ticket, err := svc.GetTicket(ctx, ticketID, userID)
+		ticket, err := svc.GetTicket(ctx, ticketID, userID, orgID)
 
 		assert.Nil(t, ticket)
 		assert.ErrorIs(t, err, apperrors.ErrTicketNotFound)
@@ -225,6 +230,7 @@ func TestTicketService_GetTicket(t *testing.T) {
 func TestTicketService_UpdateStatus(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.New()
+	orgID := uuid.New()
 	ticketID := int64(1)
 
 	t.Run("success", func(t *testing.T) {
@@ -234,7 +240,7 @@ func TestTicketService_UpdateStatus(t *testing.T) {
 		mockEventRepo := mocks.NewMockTicketEventRepository()
 		txManager := stubTransactionManager{}
 
-		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockEventRepo, txManager)
+		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockEventRepo, txManager, ticketTestUserRepo(ctx, userID, orgID))
 
 		existingTicket := &domain.Ticket{
 			ID:          ticketID,
@@ -243,9 +249,11 @@ func TestTicketService_UpdateStatus(t *testing.T) {
 			Status:      domain.StatusOpen,
 		}
 
+		mockAuthz.On("Can", mock.Anything, userID, "tickets:read").Return(true, nil)
+		mockAuthz.On("Can", mock.Anything, userID, "tickets:read:all").Return(true, nil)
 		mockAuthz.On("Can", ctx, userID, "tickets:update:status").Return(true, nil)
-		mockRepo.On("GetByID", ctx, ticketID).Return(existingTicket, nil)
-		mockRepo.On("Update", ctx, mock.AnythingOfType("*domain.Ticket")).
+		mockRepo.On("GetForUpdate", ctx, ticketID, orgID).Return(existingTicket, nil)
+		mockRepo.On("Update", ctx, mock.AnythingOfType("*domain.Ticket"), orgID).
 			Return(&domain.Ticket{
 				ID:     ticketID,
 				Title:  "Test Ticket",
@@ -256,9 +264,10 @@ func TestTicketService_UpdateStatus(t *testing.T) {
 			Return(&domain.Event{ID: 1}, nil)
 
 		params := ports.UpdateStatusParams{
-			TicketID: ticketID,
-			Status:   domain.StatusInProgress,
-			ActorID:  userID,
+			OrganizationID: orgID,
+			TicketID:       ticketID,
+			Status:         domain.StatusInProgress,
+			ActorID:        userID,
 		}
 
 		ticket, err := svc.UpdateStatus(ctx, params)
@@ -275,7 +284,7 @@ func TestTicketService_UpdateStatus(t *testing.T) {
 		mockEventRepo := mocks.NewMockTicketEventRepository()
 		txManager := stubTransactionManager{}
 
-		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockEventRepo, txManager)
+		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockEventRepo, txManager, ticketTestUserRepo(ctx, userID, orgID))
 
 		closedTicket := &domain.Ticket{
 			ID:          ticketID,
@@ -284,13 +293,16 @@ func TestTicketService_UpdateStatus(t *testing.T) {
 			Status:      domain.StatusClosed, // Already closed
 		}
 
+		mockAuthz.On("Can", mock.Anything, userID, "tickets:read").Return(true, nil)
+		mockAuthz.On("Can", mock.Anything, userID, "tickets:read:all").Return(true, nil)
 		mockAuthz.On("Can", ctx, userID, "tickets:update:status").Return(true, nil)
-		mockRepo.On("GetByID", ctx, ticketID).Return(closedTicket, nil)
+		mockRepo.On("GetForUpdate", ctx, ticketID, orgID).Return(closedTicket, nil)
 
 		params := ports.UpdateStatusParams{
-			TicketID: ticketID,
-			Status:   domain.StatusOpen, // Cannot reopen closed ticket
-			ActorID:  userID,
+			OrganizationID: orgID,
+			TicketID:       ticketID,
+			Status:         domain.StatusOpen, // Cannot reopen closed ticket
+			ActorID:        userID,
 		}
 
 		ticket, err := svc.UpdateStatus(ctx, params)
@@ -303,6 +315,7 @@ func TestTicketService_UpdateStatus(t *testing.T) {
 func TestTicketService_ListTickets(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.New()
+	orgID := uuid.New()
 
 	t.Run("admin sees all tickets", func(t *testing.T) {
 		mockRepo := mocks.NewMockTicketRepository()
@@ -311,20 +324,22 @@ func TestTicketService_ListTickets(t *testing.T) {
 		mockEventRepo := mocks.NewMockTicketEventRepository()
 		txManager := stubTransactionManager{}
 
-		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockEventRepo, txManager)
+		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockEventRepo, txManager, ticketTestUserRepo(ctx, userID, orgID))
 
 		expectedTickets := []*domain.Ticket{
 			{ID: 1, Title: "Ticket 1"},
 			{ID: 2, Title: "Ticket 2"},
 		}
 
+		mockAuthz.On("Can", ctx, userID, "tickets:read").Return(true, nil)
 		mockAuthz.On("Can", ctx, userID, "tickets:list:all").Return(true, nil)
 		mockRepo.On("ListPaginated", ctx, mock.Anything).Return(expectedTickets, nil)
 
 		params := ports.ListTicketsParams{
-			ViewerID: userID,
-			Limit:    10,
-			Offset:   0,
+			OrganizationID: orgID,
+			ViewerID:       userID,
+			Limit:          10,
+			Offset:         0,
 		}
 
 		tickets, err := svc.ListTickets(ctx, params)
@@ -340,25 +355,33 @@ func TestTicketService_ListTickets(t *testing.T) {
 		mockEventRepo := mocks.NewMockTicketEventRepository()
 		txManager := stubTransactionManager{}
 
-		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockEventRepo, txManager)
+		svc := services.NewTicketService(mockRepo, mockAuthz, mockNotifier, mockEventRepo, txManager, ticketTestUserRepo(ctx, userID, orgID))
 
 		expectedTickets := []*domain.Ticket{
 			{ID: 1, Title: "My Ticket", RequesterID: userID},
 		}
 
+		mockAuthz.On("Can", ctx, userID, "tickets:read").Return(true, nil)
 		mockAuthz.On("Can", ctx, userID, "tickets:list:all").Return(false, nil)
-		mockRepo.On("ListByRequesterPaginated", ctx, mock.Anything).Return(expectedTickets, nil)
+		mockRepo.On("ListPaginated", ctx, mock.Anything).Return(expectedTickets, nil)
 
 		params := ports.ListTicketsParams{
-			ViewerID: userID,
-			Limit:    10,
-			Offset:   0,
+			OrganizationID: orgID,
+			ViewerID:       userID,
+			Limit:          10,
+			Offset:         0,
 		}
 
 		tickets, err := svc.ListTickets(ctx, params)
 
 		require.NoError(t, err)
 		assert.Len(t, tickets, 1)
-		mockRepo.AssertNotCalled(t, "ListPaginated")
+		mockRepo.AssertExpectations(t)
 	})
+}
+
+func ticketTestUserRepo(ctx context.Context, userID, orgID uuid.UUID) *mocks.MockUserRepository {
+	repo := mocks.NewMockUserRepository()
+	repo.On("GetByID", ctx, userID).Return(&domain.User{ID: userID, OrganizationID: orgID, IsActive: true}, nil).Maybe()
+	return repo
 }

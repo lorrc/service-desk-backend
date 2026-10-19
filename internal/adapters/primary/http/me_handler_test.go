@@ -45,7 +45,7 @@ func TestMain(m *testing.M) {
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("database system is ready to accept connections").
 				WithOccurrence(2).
-				WithStartupTimeout(5*time.Second),
+				WithStartupTimeout(30*time.Second),
 		),
 	)
 	if err != nil {
@@ -91,14 +91,14 @@ func TestMePermissions(t *testing.T) {
 	authRepo := pgadapter.NewAuthorizationRepository(testPool)
 	userRepo := pgadapter.NewUserRepository(testPool)
 	defaultOrgID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
-	authService := services.NewAuthService(userRepo, authRepo, defaultOrgID)
+	authService := services.NewAuthService(userRepo, authRepo, pgadapter.NewTransactionManager(testPool), defaultOrgID)
 
 	userEmail := uuid.NewString() + "@example.com"
 	user, err := authService.Register(ctx, "Test User", userEmail, "Password1", "admin", uuid.Nil)
 	require.NoError(t, err)
 
 	router, tokenManager := newMeRouter()
-	token, err := tokenManager.GenerateToken(user.ID, user.OrganizationID)
+	token, err := tokenManager.GenerateToken(user.ID, user.OrganizationID, user.SessionVersion)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(stdhttp.MethodGet, "/me/permissions", nil)
@@ -141,7 +141,7 @@ func newMeRouter() (*chi.Mux, *auth.TokenManager) {
 	tokenManager := auth.NewTokenManager("test-secret", time.Hour)
 
 	router := chi.NewRouter()
-	router.Use(mw.JWTMiddleware(tokenManager))
+	router.Use(mw.JWTMiddleware(tokenManager, pgadapter.NewUserRepository(testPool)))
 	router.Route("/me", meHandler.RegisterRoutes)
 
 	return router, tokenManager

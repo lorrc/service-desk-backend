@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
@@ -38,11 +39,12 @@ type Config struct {
 
 // ServerConfig holds HTTP server configuration
 type ServerConfig struct {
-	Port            string
-	ReadTimeout     time.Duration
-	WriteTimeout    time.Duration
-	IdleTimeout     time.Duration
-	ShutdownTimeout time.Duration
+	TrustedProxyCIDRs []netip.Prefix
+	Port              string
+	ReadTimeout       time.Duration
+	WriteTimeout      time.Duration
+	IdleTimeout       time.Duration
+	ShutdownTimeout   time.Duration
 }
 
 // DatabaseConfig holds database configuration
@@ -142,6 +144,21 @@ func Load() (*Config, error) {
 			FirstName: getEnvOrDefault("ADMIN_FIRST_NAME", ""),
 			LastName:  getEnvOrDefault("ADMIN_LAST_NAME", ""),
 		},
+	}
+
+	for _, raw := range strings.Split(os.Getenv("TRUSTED_PROXY_CIDRS"), ",") {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		prefix, err := netip.ParsePrefix(raw)
+		if err != nil {
+			return nil, fmt.Errorf("invalid TRUSTED_PROXY_CIDRS entry %q: %w", raw, err)
+		}
+		if prefix.Addr().Is4In6() {
+			return nil, fmt.Errorf("TRUSTED_PROXY_CIDRS must use native IPv4 notation: %s", raw)
+		}
+		cfg.Server.TrustedProxyCIDRs = append(cfg.Server.TrustedProxyCIDRs, prefix.Masked())
 	}
 
 	if err := cfg.Validate(); err != nil {

@@ -29,7 +29,7 @@ func NewEventService(
 // ListTicketEvents retrieves events for a ticket after the given cursor.
 func (s *EventService) ListTicketEvents(ctx context.Context, params ports.ListTicketEventsParams) ([]*domain.Event, error) {
 	// Reuse ticket service authorization logic.
-	if _, err := s.ticketSvc.GetTicket(ctx, params.TicketID, params.ViewerID); err != nil {
+	if _, err := s.ticketSvc.GetTicket(ctx, params.TicketID, params.ViewerID, params.OrganizationID); err != nil {
 		return nil, err
 	}
 

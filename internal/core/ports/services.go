@@ -12,6 +12,7 @@ import (
 type AuthService interface {
 	Register(ctx context.Context, fullName, email, password, role string, orgID uuid.UUID) (*domain.User, error)
 	Login(ctx context.Context, email, password string) (*domain.User, error)
+	BootstrapAdmin(ctx context.Context, fullName, email, password string) error
 }
 
 // AuthorizationService defines the port for checking user permissions.
@@ -41,58 +42,65 @@ type UserLookupService interface {
 
 // CreateTicketParams defines the required input for creating a new ticket.
 type CreateTicketParams struct {
-	Title       string
-	Description string
-	Priority    domain.TicketPriority
-	RequesterID uuid.UUID
+	OrganizationID uuid.UUID
+	Title          string
+	Description    string
+	Priority       domain.TicketPriority
+	RequesterID    uuid.UUID
 }
 
 // UpdateStatusParams defines the input for changing a ticket's status.
 type UpdateStatusParams struct {
-	TicketID int64
-	Status   domain.TicketStatus
-	ActorID  uuid.UUID
+	OrganizationID uuid.UUID
+	TicketID       int64
+	Status         domain.TicketStatus
+	ActorID        uuid.UUID
 }
 
 // AssignTicketParams defines the input for assigning a ticket.
 type AssignTicketParams struct {
-	TicketID   int64
-	AssigneeID uuid.UUID
-	ActorID    uuid.UUID
+	OrganizationID uuid.UUID
+	TicketID       int64
+	AssigneeID     uuid.UUID
+	ActorID        uuid.UUID
 }
 
 // CreateCommentParams defines the input for creating a comment.
 type CreateCommentParams struct {
-	TicketID int64
-	ActorID  uuid.UUID
-	Body     string
+	OrganizationID uuid.UUID
+	TicketID       int64
+	ActorID        uuid.UUID
+	Body           string
 }
 
 // GetCommentsParams defines the input for retrieving comments.
 type GetCommentsParams struct {
-	TicketID int64
-	ActorID  uuid.UUID
+	OrganizationID uuid.UUID
+	TicketID       int64
+	ActorID        uuid.UUID
 }
 
 // ListTicketsParams defines the input for listing tickets.
 type ListTicketsParams struct {
-	ViewerID    uuid.UUID
-	Limit       int
-	Offset      int
-	Status      *string
-	Priority    *string
-	AssigneeID  *uuid.UUID
-	Unassigned  bool
-	CreatedFrom *time.Time
-	CreatedTo   *time.Time
+	OrganizationID uuid.UUID
+	ViewerID       uuid.UUID
+	Limit          int
+	Offset         int
+	Status         *string
+	Priority       *string
+	AssigneeID     *uuid.UUID
+	Unassigned     bool
+	CreatedFrom    *time.Time
+	CreatedTo      *time.Time
 }
 
 // ListTicketEventsParams defines the input for listing ticket events.
 type ListTicketEventsParams struct {
-	TicketID int64
-	ViewerID uuid.UUID
-	AfterID  int64
-	Limit    int
+	OrganizationID uuid.UUID
+	TicketID       int64
+	ViewerID       uuid.UUID
+	AfterID        int64
+	Limit          int
 }
 
 // NotificationParams defines the input for sending a notification.
@@ -106,10 +114,11 @@ type NotificationParams struct {
 // TicketService defines the core business operations for managing tickets.
 type TicketService interface {
 	CreateTicket(ctx context.Context, params CreateTicketParams) (*domain.Ticket, error)
-	GetTicket(ctx context.Context, ticketID int64, viewerID uuid.UUID) (*domain.Ticket, error)
+	GetTicket(ctx context.Context, ticketID int64, viewerID, orgID uuid.UUID) (*domain.Ticket, error)
 	UpdateStatus(ctx context.Context, params UpdateStatusParams) (*domain.Ticket, error)
 	AssignTicket(ctx context.Context, params AssignTicketParams) (*domain.Ticket, error)
 	ListTickets(ctx context.Context, params ListTicketsParams) ([]*domain.Ticket, error)
+	GetTicketCounts(ctx context.Context, viewerID, orgID uuid.UUID) (*domain.TicketCounts, error)
 	Shutdown()
 }
 

@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/lorrc/service-desk-backend/internal/core/domain"
 )
 
@@ -14,7 +13,9 @@ type UserRepository interface {
 	Create(ctx context.Context, user *domain.User) (*domain.User, error)
 	GetByEmail(ctx context.Context, email string) (*domain.User, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error)
-	CountUsers(ctx context.Context) (int64, error)
+	LockOrganization(ctx context.Context, orgID uuid.UUID) error
+	GetUserInfo(ctx context.Context, orgID uuid.UUID, userIDs []uuid.UUID) (map[uuid.UUID]domain.UserInfo, error)
+	ValidateSession(ctx context.Context, userID, orgID uuid.UUID, version int64) (bool, error)
 	ListAssignableUsers(ctx context.Context, orgID uuid.UUID) ([]*domain.User, error)
 	ListByOrganization(ctx context.Context, orgID uuid.UUID) ([]*domain.UserSummary, error)
 	SetActive(ctx context.Context, userID uuid.UUID, isActive bool) error
@@ -25,10 +26,11 @@ type UserRepository interface {
 // TicketRepository defines the port for ticket persistence.
 type TicketRepository interface {
 	Create(ctx context.Context, ticket *domain.Ticket) (*domain.Ticket, error)
-	GetByID(ctx context.Context, id int64) (*domain.Ticket, error)
-	Update(ctx context.Context, ticket *domain.Ticket) (*domain.Ticket, error)
+	GetByID(ctx context.Context, id int64, orgID uuid.UUID) (*domain.Ticket, error)
+	GetForUpdate(ctx context.Context, id int64, orgID uuid.UUID) (*domain.Ticket, error)
+	Update(ctx context.Context, ticket *domain.Ticket, orgID uuid.UUID) (*domain.Ticket, error)
 	ListPaginated(ctx context.Context, params ListTicketsRepoParams) ([]*domain.Ticket, error)
-	ListByRequesterPaginated(ctx context.Context, params ListTicketsRepoParams) ([]*domain.Ticket, error)
+	GetCounts(ctx context.Context, orgID uuid.UUID, requesterID *uuid.UUID) (*domain.TicketCounts, error)
 }
 
 // AuthorizationRepository defines the port for RBAC data access.
@@ -58,13 +60,14 @@ type TicketEventRepository interface {
 
 // ListTicketsRepoParams defines parameters for paginated ticket queries.
 type ListTicketsRepoParams struct {
-	Limit       int32
-	Offset      int32
-	Status      pgtype.Text
-	Priority    pgtype.Text
-	RequesterID pgtype.UUID
-	AssigneeID  pgtype.UUID
-	Unassigned  pgtype.Bool
-	CreatedFrom pgtype.Timestamptz
-	CreatedTo   pgtype.Timestamptz
+	OrganizationID uuid.UUID
+	Limit          int
+	Offset         int
+	Status         *string
+	Priority       *string
+	RequesterID    *uuid.UUID
+	AssigneeID     *uuid.UUID
+	Unassigned     bool
+	CreatedFrom    *time.Time
+	CreatedTo      *time.Time
 }

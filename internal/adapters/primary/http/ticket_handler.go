@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	maxTicketsPerPage = 100
+	maxTicketsPerPage  = 100
 	defaultEventsLimit = 50
 	maxEventsLimit     = 200
 )
@@ -61,6 +61,7 @@ func (h *TicketHandler) Router() http.Handler {
 func (h *TicketHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/", h.HandleListTickets)
 	r.Post("/", h.HandleCreateTicket)
+	r.Get("/counts", h.HandleTicketCounts)
 
 	// Routes for a specific ticket
 	r.Route("/{ticketID}", func(r chi.Router) {
@@ -141,18 +142,18 @@ func (r *AssignTicketRequest) Validate() error {
 
 // TicketDTO defines the JSON response for tickets.
 type TicketDTO struct {
-	ID          int64   `json:"id"`
-	Title       string  `json:"title"`
-	Description string  `json:"description"`
-	Status      string  `json:"status"`
-	Priority    string  `json:"priority"`
-	RequesterID string  `json:"requesterId"`
+	ID          int64        `json:"id"`
+	Title       string       `json:"title"`
+	Description string       `json:"description"`
+	Status      string       `json:"status"`
+	Priority    string       `json:"priority"`
+	RequesterID string       `json:"requesterId"`
 	Requester   *UserInfoDTO `json:"requester,omitempty"`
-	AssigneeID  *string `json:"assigneeId"`
+	AssigneeID  *string      `json:"assigneeId"`
 	Assignee    *UserInfoDTO `json:"assignee,omitempty"`
-	CreatedAt   string  `json:"createdAt"`
-	UpdatedAt   *string `json:"updatedAt"`
-	ClosedAt    *string `json:"closedAt"`
+	CreatedAt   string       `json:"createdAt"`
+	UpdatedAt   *string      `json:"updatedAt"`
+	ClosedAt    *string      `json:"closedAt"`
 }
 
 func toTicketDTO(ticket *domain.Ticket, userInfoByID map[uuid.UUID]UserInfoDTO) TicketDTO {
@@ -279,15 +280,16 @@ func (h *TicketHandler) HandleListTickets(w http.ResponseWriter, r *http.Request
 	}
 
 	params := ports.ListTicketsParams{
-		ViewerID:    claims.UserID,
-		Limit:       pagination.Limit + 1,
-		Offset:      pagination.Offset,
-		Status:      status,
-		Priority:    priority,
-		AssigneeID:  assigneeID,
-		Unassigned:  unassigned,
-		CreatedFrom: createdFromTime,
-		CreatedTo:   createdToTime,
+		OrganizationID: claims.OrgID,
+		ViewerID:       claims.UserID,
+		Limit:          pagination.Limit,
+		Offset:         pagination.Offset,
+		Status:         status,
+		Priority:       priority,
+		AssigneeID:     assigneeID,
+		Unassigned:     unassigned,
+		CreatedFrom:    createdFromTime,
+		CreatedTo:      createdToTime,
 	}
 
 	tickets, err := h.ticketService.ListTickets(r.Context(), params)
@@ -330,10 +332,11 @@ func (h *TicketHandler) HandleCreateTicket(w http.ResponseWriter, r *http.Reques
 	}
 
 	params := ports.CreateTicketParams{
-		Title:       req.Title,
-		Description: req.Description,
-		Priority:    domain.TicketPriority(req.Priority),
-		RequesterID: claims.UserID,
+		OrganizationID: claims.OrgID,
+		Title:          req.Title,
+		Description:    req.Description,
+		Priority:       domain.TicketPriority(req.Priority),
+		RequesterID:    claims.UserID,
 	}
 
 	ticket, err := h.ticketService.CreateTicket(r.Context(), params)
@@ -374,7 +377,7 @@ func (h *TicketHandler) HandleGetTicket(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	ticket, err := h.ticketService.GetTicket(r.Context(), ticketID, claims.UserID)
+	ticket, err := h.ticketService.GetTicket(r.Context(), ticketID, claims.UserID, claims.OrgID)
 	if err != nil {
 		h.errorHandler.Handle(w, r, err)
 		return
@@ -419,9 +422,10 @@ func (h *TicketHandler) HandleUpdateTicketStatus(w http.ResponseWriter, r *http.
 	}
 
 	params := ports.UpdateStatusParams{
-		TicketID: ticketID,
-		Status:   domain.TicketStatus(req.Status),
-		ActorID:  claims.UserID,
+		OrganizationID: claims.OrgID,
+		TicketID:       ticketID,
+		Status:         domain.TicketStatus(req.Status),
+		ActorID:        claims.UserID,
 	}
 
 	ticket, err := h.ticketService.UpdateStatus(r.Context(), params)
@@ -482,9 +486,10 @@ func (h *TicketHandler) HandleAssignTicket(w http.ResponseWriter, r *http.Reques
 	}
 
 	params := ports.AssignTicketParams{
-		TicketID:   ticketID,
-		AssigneeID: assigneeID,
-		ActorID:    claims.UserID,
+		OrganizationID: claims.OrgID,
+		TicketID:       ticketID,
+		AssigneeID:     assigneeID,
+		ActorID:        claims.UserID,
 	}
 
 	ticket, err := h.ticketService.AssignTicket(r.Context(), params)
@@ -539,10 +544,11 @@ func (h *TicketHandler) HandleListTicketEvents(w http.ResponseWriter, r *http.Re
 	}
 
 	params := ports.ListTicketEventsParams{
-		TicketID: ticketID,
-		ViewerID: claims.UserID,
-		AfterID:  afterID,
-		Limit:    limit,
+		OrganizationID: claims.OrgID,
+		TicketID:       ticketID,
+		ViewerID:       claims.UserID,
+		AfterID:        afterID,
+		Limit:          limit,
 	}
 
 	events, err := h.eventService.ListTicketEvents(r.Context(), params)
@@ -633,4 +639,18 @@ func collectTicketUserIDs(tickets []*domain.Ticket) []uuid.UUID {
 		}
 	}
 	return userIDs
+}
+
+// HandleTicketCounts returns aggregates for the authenticated viewer's ticket scope.
+func (h *TicketHandler) HandleTicketCounts(w http.ResponseWriter, r *http.Request) {
+	claims, ok := h.getClaims(w, r)
+	if !ok {
+		return
+	}
+	counts, err := h.ticketService.GetTicketCounts(r.Context(), claims.UserID, claims.OrgID)
+	if err != nil {
+		h.errorHandler.Handle(w, r, err)
+		return
+	}
+	WriteJSON(w, http.StatusOK, counts)
 }

@@ -3,7 +3,7 @@ package services
 import (
 	"context"
 	"errors"
-	"fmt" // Added for error wrapping
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,128 +12,114 @@ import (
 	"github.com/lorrc/service-desk-backend/internal/core/ports"
 )
 
-// AuthService implements authentication business logic
+// AuthService manages credentials and atomic account registration.
 type AuthService struct {
 	userRepo     ports.UserRepository
-	authRepo     ports.AuthorizationRepository // <--- ADDED: Dependency for role assignment
+	authRepo     ports.AuthorizationRepository
+	txManager    ports.TransactionManager
 	defaultOrgID uuid.UUID
 }
 
 var _ ports.AuthService = (*AuthService)(nil)
 
-// NewAuthService creates a new authentication service
-// We updated the constructor to require authRepo
-func NewAuthService(
-	userRepo ports.UserRepository,
-	authRepo ports.AuthorizationRepository, // <--- ADDED: Inject dependency
-	defaultOrgID uuid.UUID,
-) ports.AuthService {
-	return &AuthService{
-		userRepo:     userRepo,
-		authRepo:     authRepo, // <--- ADDED: Assign dependency
-		defaultOrgID: defaultOrgID,
-	}
+// NewAuthService creates an authentication service.
+func NewAuthService(userRepo ports.UserRepository, authRepo ports.AuthorizationRepository, txManager ports.TransactionManager, defaultOrgID uuid.UUID) ports.AuthService {
+	return &AuthService{userRepo: userRepo, authRepo: authRepo, txManager: txManager, defaultOrgID: defaultOrgID}
 }
 
-// Register creates a new user account with validated credentials and assigns a default role
+// Register creates a user and their role in the same transaction.
+// Public registration callers must supply the customer role.
 func (s *AuthService) Register(ctx context.Context, fullName, email, password, role string, orgID uuid.UUID) (*domain.User, error) {
-	// 1. Validate registration parameters
-	params := domain.UserRegistrationParams{
-		FullName: fullName,
-		Email:    email,
-		Password: password,
+	if orgID == uuid.Nil {
+		orgID = s.defaultOrgID
 	}
-
-	if err := params.Validate(); err != nil {
-		return nil, err
+	if role == "" {
+		role = "customer"
 	}
-
-	// 2. Check if user already exists
-	_, err := s.userRepo.GetByEmail(ctx, email)
-	if err == nil {
-		return nil, apperrors.ErrUserExists
-	}
-	if !errors.Is(err, apperrors.ErrUserNotFound) {
-		return nil, err // An actual DB error occurred
-	}
-
-	// 3. Determine organization ID
-	targetOrgID := orgID
-	if targetOrgID == uuid.Nil {
-		targetOrgID = s.defaultOrgID
-	}
-
-	// 4. Determine if this is the first user
-	userCount, err := s.userRepo.CountUsers(ctx)
+	user, err := domain.NewUser(domain.UserRegistrationParams{FullName: fullName, Email: email, Password: password}, orgID)
 	if err != nil {
 		return nil, err
 	}
 
-	// 5. Create user domain object
-	user, err := domain.NewUser(params, targetOrgID)
+	var created *domain.User
+	err = s.txManager.WithTransaction(ctx, func(txCtx context.Context) error {
+		var err error
+		created, err = s.createAccount(txCtx, user, role)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
-
-	// 6. Persist the user
-	createdUser, err := s.userRepo.Create(ctx, user)
-	if err != nil {
-		return nil, err
-	}
-
-	// 7. Assign Role
-	// First user is auto-promoted to admin.
-	assignRole := "customer"
-	if userCount == 0 {
-		assignRole = "admin"
-	} else if role != "" {
-		assignRole = role
-	}
-
-	err = s.authRepo.AssignRole(ctx, createdUser.ID, assignRole)
-	if err != nil {
-		// Note: In a production environment, you should wrap steps 5 & 6 in a database transaction
-		// or delete the user here if role assignment fails to prevent "ghost users".
-		return nil, fmt.Errorf("user created but failed to assign role: %w", err)
-	}
-
-	return createdUser, nil
+	return created, nil
 }
 
-// Login authenticates a user with email and password
+func (s *AuthService) createAccount(ctx context.Context, user *domain.User, role string) (*domain.User, error) {
+	created, err := s.userRepo.Create(ctx, user)
+	if err != nil {
+		return nil, fmt.Errorf("create user: %w", err)
+	}
+	if err := s.authRepo.AssignRole(ctx, created.ID, role); err != nil {
+		return nil, fmt.Errorf("assign user role: %w", err)
+	}
+	return created, nil
+}
+
+// BootstrapAdmin idempotently provisions the configured administrator.
+// Locking the organization serializes bootstrap across application replicas.
+func (s *AuthService) BootstrapAdmin(ctx context.Context, fullName, email, password string) error {
+	return s.txManager.WithTransaction(ctx, func(txCtx context.Context) error {
+		if err := s.userRepo.LockOrganization(txCtx, s.defaultOrgID); err != nil {
+			return err
+		}
+		user, err := s.userRepo.GetByEmail(txCtx, email)
+		if errors.Is(err, apperrors.ErrUserNotFound) {
+			user, err = domain.NewUser(domain.UserRegistrationParams{FullName: fullName, Email: email, Password: password}, s.defaultOrgID)
+			if err != nil {
+				return err
+			}
+			_, err = s.createAccount(txCtx, user, "admin")
+			return err
+		}
+		if err != nil {
+			return err
+		}
+		if user.OrganizationID != s.defaultOrgID {
+			return apperrors.ErrForbidden
+		}
+		// Existing accounts keep their current password and active status.
+		err = s.authRepo.AssignRole(txCtx, user.ID, "admin")
+		if errors.Is(err, apperrors.ErrRoleAlreadyAssigned) {
+			return nil
+		}
+		return err
+	})
+}
+
+// Login authenticates an active user and records their last login.
 func (s *AuthService) Login(ctx context.Context, email, password string) (*domain.User, error) {
-	// Basic validation
 	if email == "" {
 		return nil, apperrors.ErrEmailRequired
 	}
 	if password == "" {
 		return nil, apperrors.ErrPasswordRequired
 	}
-
-	// Find user by email
 	user, err := s.userRepo.GetByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, apperrors.ErrUserNotFound) {
-			// Don't reveal whether email exists
 			return nil, apperrors.ErrInvalidCredentials
 		}
 		return nil, err
 	}
-
-	// Verify password
 	if !user.CheckPassword(password) {
 		return nil, apperrors.ErrInvalidCredentials
 	}
-
 	if !user.IsActive {
 		return nil, apperrors.ErrUserInactive
 	}
-
 	now := time.Now().UTC()
 	if err := s.userRepo.UpdateLastActive(ctx, user.ID, now); err != nil {
 		return nil, err
 	}
 	user.LastActiveAt = &now
-
 	return user, nil
 }

@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,7 +14,6 @@ import (
 	"github.com/lorrc/service-desk-backend/internal/core/domain"
 	apperrors "github.com/lorrc/service-desk-backend/internal/core/errors"
 	"github.com/lorrc/service-desk-backend/internal/core/ports"
-	"github.com/lorrc/service-desk-backend/internal/core/utils"
 )
 
 // TicketRepository is the secondary adapter for ticket persistence.
@@ -36,7 +36,7 @@ func mapDBTicketToDomain(dbTicket db.Ticket) *domain.Ticket {
 	domainTicket := &domain.Ticket{
 		ID:          dbTicket.ID,
 		Title:       dbTicket.Title,
-		Description: utils.FromString(dbTicket.Description),
+		Description: fromText(dbTicket.Description),
 		Status:      domain.TicketStatus(dbTicket.Status),
 		Priority:    domain.TicketPriority(dbTicket.Priority),
 		CreatedAt:   dbTicket.CreatedAt.Time,
@@ -73,7 +73,7 @@ func (r *TicketRepository) Create(ctx context.Context, ticket *domain.Ticket) (*
 	q := db.New(GetDBTX(ctx, r.pool))
 	params := db.CreateTicketParams{
 		Title:       ticket.Title,
-		Description: utils.ToString(ticket.Description),
+		Description: toText(ticket.Description),
 		Status:      string(ticket.Status),
 		Priority:    string(ticket.Priority),
 		RequesterID: pgtype.UUID{Bytes: ticket.RequesterID, Valid: true},
@@ -87,9 +87,9 @@ func (r *TicketRepository) Create(ctx context.Context, ticket *domain.Ticket) (*
 }
 
 // GetByID retrieves a single ticket by its ID.
-func (r *TicketRepository) GetByID(ctx context.Context, id int64) (*domain.Ticket, error) {
+func (r *TicketRepository) GetByID(ctx context.Context, id int64, orgID uuid.UUID) (*domain.Ticket, error) {
 	q := db.New(GetDBTX(ctx, r.pool))
-	dbTicket, err := q.GetTicketByID(ctx, id)
+	dbTicket, err := q.GetTicketByID(ctx, db.GetTicketByIDParams{ID: id, OrganizationID: pgtype.UUID{Bytes: orgID, Valid: true}})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, apperrors.ErrTicketNotFound
@@ -100,11 +100,12 @@ func (r *TicketRepository) GetByID(ctx context.Context, id int64) (*domain.Ticke
 }
 
 // Update persists changes to an existing ticket entity.
-func (r *TicketRepository) Update(ctx context.Context, ticket *domain.Ticket) (*domain.Ticket, error) {
+func (r *TicketRepository) Update(ctx context.Context, ticket *domain.Ticket, orgID uuid.UUID) (*domain.Ticket, error) {
 	q := db.New(GetDBTX(ctx, r.pool))
 	params := db.UpdateTicketParams{
-		ID:     ticket.ID,
-		Status: string(ticket.Status),
+		OrganizationID: pgtype.UUID{Bytes: orgID, Valid: true},
+		ID:             ticket.ID,
+		Status:         string(ticket.Status),
 		AssigneeID: pgtype.UUID{
 			Bytes: [16]byte{},
 			Valid: ticket.AssigneeID != nil,
@@ -134,52 +135,66 @@ func (r *TicketRepository) Update(ctx context.Context, ticket *domain.Ticket) (*
 
 	updatedTicket, err := q.UpdateTicket(ctx, params)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, apperrors.ErrTicketNotFound
+		}
 		return nil, err
 	}
 	return mapDBTicketToDomain(updatedTicket), nil
 }
 
-// ListPaginated retrieves all tickets with pagination and optional filters.
-func (r *TicketRepository) ListPaginated(ctx context.Context, params ports.ListTicketsRepoParams) ([]*domain.Ticket, error) {
-	q := db.New(GetDBTX(ctx, r.pool))
-	dbParams := db.ListTicketsPaginatedParams{
-		Limit:       params.Limit,
-		Offset:      params.Offset,
-		Status:      params.Status,
-		Priority:    params.Priority,
-		AssigneeID:  params.AssigneeID,
-		Unassigned:  params.Unassigned,
-		CreatedFrom: params.CreatedFrom,
-		CreatedTo:   params.CreatedTo,
+// GetForUpdate locks a ticket until the surrounding transaction completes.
+func (r *TicketRepository) GetForUpdate(ctx context.Context, id int64, orgID uuid.UUID) (*domain.Ticket, error) {
+	if _, ok := TxFromContext(ctx); !ok {
+		return nil, fmt.Errorf("ticket lock requires a transaction")
 	}
-
-	dbTickets, err := q.ListTicketsPaginated(ctx, dbParams)
+	ticket, err := db.New(GetDBTX(ctx, r.pool)).GetTicketForUpdate(ctx, db.GetTicketForUpdateParams{ID: id, OrganizationID: pgtype.UUID{Bytes: orgID, Valid: true}})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, apperrors.ErrTicketNotFound
+	}
 	if err != nil {
 		return nil, err
 	}
-
-	return mapDBTicketListToDomain(dbTickets), nil
+	return mapDBTicketToDomain(ticket), nil
 }
 
-// ListByRequesterPaginated retrieves tickets for a specific user with pagination and optional filters.
-func (r *TicketRepository) ListByRequesterPaginated(ctx context.Context, params ports.ListTicketsRepoParams) ([]*domain.Ticket, error) {
-	q := db.New(GetDBTX(ctx, r.pool))
-	dbParams := db.ListTicketsByRequesterPaginatedParams{
-		RequesterID: params.RequesterID,
-		Limit:       params.Limit,
-		Offset:      params.Offset,
-		Status:      params.Status,
-		Priority:    params.Priority,
-		AssigneeID:  params.AssigneeID,
-		Unassigned:  params.Unassigned,
-		CreatedFrom: params.CreatedFrom,
-		CreatedTo:   params.CreatedTo,
-	}
-
-	dbTickets, err := q.ListTicketsByRequesterPaginated(ctx, dbParams)
+// ListPaginated retrieves tickets within the authorized organization and requester scope.
+func (r *TicketRepository) ListPaginated(ctx context.Context, params ports.ListTicketsRepoParams) ([]*domain.Ticket, error) {
+	rows, err := db.New(GetDBTX(ctx, r.pool)).ListTicketsPaginated(ctx, db.ListTicketsPaginatedParams{
+		OrganizationID: pgtype.UUID{Bytes: params.OrganizationID, Valid: true},
+		RequesterID:    nullableUUID(params.RequesterID),
+		Limit:          int32(params.Limit), Offset: int32(params.Offset),
+		Status: nullableText(params.Status), Priority: nullableText(params.Priority),
+		AssigneeID: nullableUUID(params.AssigneeID), Unassigned: params.Unassigned,
+		CreatedFrom: nullableTime(params.CreatedFrom), CreatedTo: nullableTime(params.CreatedTo),
+	})
 	if err != nil {
 		return nil, err
 	}
+	return mapDBTicketListToDomain(rows), nil
+}
 
-	return mapDBTicketListToDomain(dbTickets), nil
+// GetCounts aggregates the complete authorized ticket set.
+func (r *TicketRepository) GetCounts(ctx context.Context, orgID uuid.UUID, requesterID *uuid.UUID) (*domain.TicketCounts, error) {
+	counts, err := db.New(GetDBTX(ctx, r.pool)).GetTicketCounts(ctx, db.GetTicketCountsParams{
+		OrganizationID: pgtype.UUID{Bytes: orgID, Valid: true}, RequesterID: nullableUUID(requesterID),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &domain.TicketCounts{Open: counts.Open, InProgress: counts.InProgress, Closed: counts.Closed, HighPriority: counts.HighPriority}, nil
+}
+
+func nullableUUID(id *uuid.UUID) pgtype.UUID {
+	if id == nil {
+		return pgtype.UUID{}
+	}
+	return pgtype.UUID{Bytes: *id, Valid: true}
+}
+
+func nullableTime(value *time.Time) pgtype.Timestamptz {
+	if value == nil {
+		return pgtype.Timestamptz{}
+	}
+	return pgtype.Timestamptz{Time: *value, Valid: true}
 }

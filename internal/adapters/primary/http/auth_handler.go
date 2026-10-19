@@ -118,7 +118,7 @@ func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := h.tokenManager.GenerateToken(user.ID, user.OrganizationID)
+	token, err := h.tokenManager.GenerateToken(user.ID, user.OrganizationID, user.SessionVersion)
 	if err != nil {
 		h.logger.Error("failed to generate token",
 			"user_id", user.ID,
@@ -159,7 +159,7 @@ func (h *AuthHandler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := h.tokenManager.GenerateToken(user.ID, user.OrganizationID)
+	token, err := h.tokenManager.GenerateToken(user.ID, user.OrganizationID, user.SessionVersion)
 	if err != nil {
 		h.logger.Error("failed to generate token after registration",
 			"user_id", user.ID,

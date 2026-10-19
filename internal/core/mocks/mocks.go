@@ -43,9 +43,21 @@ func (m *MockUserRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain
 	return args.Get(0).(*domain.User), args.Error(1)
 }
 
-func (m *MockUserRepository) CountUsers(ctx context.Context) (int64, error) {
-	args := m.Called(ctx)
-	return args.Get(0).(int64), args.Error(1)
+func (m *MockUserRepository) LockOrganization(ctx context.Context, orgID uuid.UUID) error {
+	return m.Called(ctx, orgID).Error(0)
+}
+
+func (m *MockUserRepository) ValidateSession(ctx context.Context, userID, orgID uuid.UUID, version int64) (bool, error) {
+	args := m.Called(ctx, userID, orgID, version)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockUserRepository) GetUserInfo(ctx context.Context, orgID uuid.UUID, userIDs []uuid.UUID) (map[uuid.UUID]domain.UserInfo, error) {
+	args := m.Called(ctx, orgID, userIDs)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(map[uuid.UUID]domain.UserInfo), args.Error(1)
 }
 
 func (m *MockUserRepository) ListAssignableUsers(ctx context.Context, orgID uuid.UUID) ([]*domain.User, error) {
@@ -96,16 +108,16 @@ func (m *MockTicketRepository) Create(ctx context.Context, ticket *domain.Ticket
 	return args.Get(0).(*domain.Ticket), args.Error(1)
 }
 
-func (m *MockTicketRepository) GetByID(ctx context.Context, id int64) (*domain.Ticket, error) {
-	args := m.Called(ctx, id)
+func (m *MockTicketRepository) GetByID(ctx context.Context, id int64, orgID uuid.UUID) (*domain.Ticket, error) {
+	args := m.Called(ctx, id, orgID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
 	return args.Get(0).(*domain.Ticket), args.Error(1)
 }
 
-func (m *MockTicketRepository) Update(ctx context.Context, ticket *domain.Ticket) (*domain.Ticket, error) {
-	args := m.Called(ctx, ticket)
+func (m *MockTicketRepository) Update(ctx context.Context, ticket *domain.Ticket, orgID uuid.UUID) (*domain.Ticket, error) {
+	args := m.Called(ctx, ticket, orgID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -120,12 +132,20 @@ func (m *MockTicketRepository) ListPaginated(ctx context.Context, params ports.L
 	return args.Get(0).([]*domain.Ticket), args.Error(1)
 }
 
-func (m *MockTicketRepository) ListByRequesterPaginated(ctx context.Context, params ports.ListTicketsRepoParams) ([]*domain.Ticket, error) {
-	args := m.Called(ctx, params)
+func (m *MockTicketRepository) GetForUpdate(ctx context.Context, id int64, orgID uuid.UUID) (*domain.Ticket, error) {
+	args := m.Called(ctx, id, orgID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).([]*domain.Ticket), args.Error(1)
+	return args.Get(0).(*domain.Ticket), args.Error(1)
+}
+
+func (m *MockTicketRepository) GetCounts(ctx context.Context, orgID uuid.UUID, requesterID *uuid.UUID) (*domain.TicketCounts, error) {
+	args := m.Called(ctx, orgID, requesterID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*domain.TicketCounts), args.Error(1)
 }
 
 // MockAuthorizationRepository is a mock implementation of ports.AuthorizationRepository
@@ -224,8 +244,8 @@ func (m *MockTicketService) CreateTicket(ctx context.Context, params ports.Creat
 	return args.Get(0).(*domain.Ticket), args.Error(1)
 }
 
-func (m *MockTicketService) GetTicket(ctx context.Context, ticketID int64, viewerID uuid.UUID) (*domain.Ticket, error) {
-	args := m.Called(ctx, ticketID, viewerID)
+func (m *MockTicketService) GetTicket(ctx context.Context, ticketID int64, viewerID, orgID uuid.UUID) (*domain.Ticket, error) {
+	args := m.Called(ctx, ticketID, viewerID, orgID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -310,4 +330,12 @@ func NewMockTransactionManager() *MockTransactionManager {
 func (m *MockTransactionManager) WithTransaction(ctx context.Context, fn func(ctx context.Context) error) error {
 	args := m.Called(ctx, fn)
 	return args.Error(0)
+}
+
+func (m *MockTicketService) GetTicketCounts(ctx context.Context, viewerID, orgID uuid.UUID) (*domain.TicketCounts, error) {
+	args := m.Called(ctx, viewerID, orgID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*domain.TicketCounts), args.Error(1)
 }

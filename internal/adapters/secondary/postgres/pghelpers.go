@@ -1,30 +1,30 @@
-package utils
+package postgres
 
 import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// ToString converts a domain's primitive string to a pgtype.Text.
+// toText converts a domain's primitive string to a pgtype.Text.
 // An empty string is considered invalid (NULL).
-func ToString(s string) pgtype.Text {
+func toText(s string) pgtype.Text {
 	return pgtype.Text{
 		String: s,
 		Valid:  s != "",
 	}
 }
 
-// FromString converts a pgtype.Text to a domain's primitive string.
+// fromText converts a pgtype.Text to a domain's primitive string.
 // A NULL value is converted to an empty string ("").
-func FromString(t pgtype.Text) string {
+func fromText(t pgtype.Text) string {
 	if !t.Valid {
 		return ""
 	}
 	return t.String
 }
 
-// ToNullString converts a handler's *string (pointer) to a pgtype.Text.
+// nullableText converts a handler's *string (pointer) to a pgtype.Text.
 // A nil pointer is considered invalid (NULL).
-func ToNullString(s *string) pgtype.Text {
+func nullableText(s *string) pgtype.Text {
 	if s == nil {
 		return pgtype.Text{Valid: false}
 	}

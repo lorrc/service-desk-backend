@@ -33,7 +33,7 @@ func TestAdminUsersList(t *testing.T) {
 
 	userRepo := pgadapter.NewUserRepository(testPool)
 	authRepo := pgadapter.NewAuthorizationRepository(testPool)
-	authService := services.NewAuthService(userRepo, authRepo, orgID)
+	authService := services.NewAuthService(userRepo, authRepo, pgadapter.NewTransactionManager(testPool), orgID)
 
 	agent := registerUser(t, ctx, authService, "Agent User", "agent-"+uuid.NewString()+"@example.com", "agent", orgID)
 	customer := registerUser(t, ctx, authService, "Customer User", "customer-"+uuid.NewString()+"@example.com", "customer", orgID)
@@ -66,12 +66,12 @@ func TestAdminUsersList_Forbidden(t *testing.T) {
 
 	userRepo := pgadapter.NewUserRepository(testPool)
 	authRepo := pgadapter.NewAuthorizationRepository(testPool)
-	authService := services.NewAuthService(userRepo, authRepo, orgID)
+	authService := services.NewAuthService(userRepo, authRepo, pgadapter.NewTransactionManager(testPool), orgID)
 
 	customer := registerUser(t, ctx, authService, "Customer User", "customer-"+uuid.NewString()+"@example.com", "customer", orgID)
 
 	router, tokenManager := newAdminRouter()
-	token, err := tokenManager.GenerateToken(customer.ID, orgID)
+	token, err := tokenManager.GenerateToken(customer.ID, orgID, customer.SessionVersion)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(stdhttp.MethodGet, "/admin/users", nil)
@@ -91,7 +91,7 @@ func TestAdminUpdateUserRole(t *testing.T) {
 
 	userRepo := pgadapter.NewUserRepository(testPool)
 	authRepo := pgadapter.NewAuthorizationRepository(testPool)
-	authService := services.NewAuthService(userRepo, authRepo, orgID)
+	authService := services.NewAuthService(userRepo, authRepo, pgadapter.NewTransactionManager(testPool), orgID)
 
 	target := registerUser(t, ctx, authService, "Target User", "target-"+uuid.NewString()+"@example.com", "customer", orgID)
 
@@ -129,7 +129,7 @@ func TestAdminUpdateUserStatus(t *testing.T) {
 
 	userRepo := pgadapter.NewUserRepository(testPool)
 	authRepo := pgadapter.NewAuthorizationRepository(testPool)
-	authService := services.NewAuthService(userRepo, authRepo, orgID)
+	authService := services.NewAuthService(userRepo, authRepo, pgadapter.NewTransactionManager(testPool), orgID)
 
 	target := registerUser(t, ctx, authService, "Inactive User", "inactive-"+uuid.NewString()+"@example.com", "customer", orgID)
 
@@ -168,7 +168,7 @@ func TestAdminResetPassword(t *testing.T) {
 
 	userRepo := pgadapter.NewUserRepository(testPool)
 	authRepo := pgadapter.NewAuthorizationRepository(testPool)
-	authService := services.NewAuthService(userRepo, authRepo, orgID)
+	authService := services.NewAuthService(userRepo, authRepo, pgadapter.NewTransactionManager(testPool), orgID)
 
 	target := registerUser(t, ctx, authService, "Reset User", "reset-"+uuid.NewString()+"@example.com", "customer", orgID)
 
@@ -200,13 +200,13 @@ func TestAdminResetPassword_Forbidden(t *testing.T) {
 
 	userRepo := pgadapter.NewUserRepository(testPool)
 	authRepo := pgadapter.NewAuthorizationRepository(testPool)
-	authService := services.NewAuthService(userRepo, authRepo, orgID)
+	authService := services.NewAuthService(userRepo, authRepo, pgadapter.NewTransactionManager(testPool), orgID)
 
 	customer := registerUser(t, ctx, authService, "Customer User", "customer-"+uuid.NewString()+"@example.com", "customer", orgID)
 	target := registerUser(t, ctx, authService, "Target User", "target-"+uuid.NewString()+"@example.com", "customer", orgID)
 
 	router, tokenManager := newAdminRouter()
-	token, err := tokenManager.GenerateToken(customer.ID, orgID)
+	token, err := tokenManager.GenerateToken(customer.ID, orgID, customer.SessionVersion)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(stdhttp.MethodPost, "/admin/users/"+target.ID.String()+"/reset-password", nil)
@@ -225,7 +225,7 @@ func TestAdminAnalyticsOverview(t *testing.T) {
 
 	userRepo := pgadapter.NewUserRepository(testPool)
 	authRepo := pgadapter.NewAuthorizationRepository(testPool)
-	authService := services.NewAuthService(userRepo, authRepo, orgID)
+	authService := services.NewAuthService(userRepo, authRepo, pgadapter.NewTransactionManager(testPool), orgID)
 
 	agent := registerUser(t, ctx, authService, "Agent User", "agent-"+uuid.NewString()+"@example.com", "agent", orgID)
 	customer := registerUser(t, ctx, authService, "Customer User", "customer-"+uuid.NewString()+"@example.com", "customer", orgID)
@@ -238,7 +238,7 @@ func TestAdminAnalyticsOverview(t *testing.T) {
 	closedTicket := createTicket(t, ctx, ticketRepo, customer.ID, "Closed Ticket")
 	require.NoError(t, closedTicket.Assign(agent.ID))
 	require.NoError(t, closedTicket.UpdateStatus(domain.StatusClosed))
-	_, err := ticketRepo.Update(ctx, closedTicket)
+	_, err := ticketRepo.Update(ctx, closedTicket, orgID)
 	require.NoError(t, err)
 
 	router, _ := newAdminRouter()
@@ -276,7 +276,7 @@ func newAdminRouter() (*chi.Mux, *auth.TokenManager) {
 	tokenManager := auth.NewTokenManager("test-secret", time.Hour)
 
 	router := chi.NewRouter()
-	router.Use(mw.JWTMiddleware(tokenManager))
+	router.Use(mw.JWTMiddleware(tokenManager, pgadapter.NewUserRepository(testPool)))
 	router.Route("/admin", adminHandler.RegisterRoutes)
 
 	return router, tokenManager
@@ -292,12 +292,12 @@ func createTestOrganization(t *testing.T, ctx context.Context) uuid.UUID {
 func createAdminAndToken(t *testing.T, ctx context.Context, orgID uuid.UUID) (*domain.User, string) {
 	userRepo := pgadapter.NewUserRepository(testPool)
 	authRepo := pgadapter.NewAuthorizationRepository(testPool)
-	authService := services.NewAuthService(userRepo, authRepo, orgID)
+	authService := services.NewAuthService(userRepo, authRepo, pgadapter.NewTransactionManager(testPool), orgID)
 
 	admin := registerUser(t, ctx, authService, "Admin User", "admin-"+uuid.NewString()+"@example.com", "admin", orgID)
 
 	tokenManager := auth.NewTokenManager("test-secret", time.Hour)
-	token, err := tokenManager.GenerateToken(admin.ID, orgID)
+	token, err := tokenManager.GenerateToken(admin.ID, orgID, admin.SessionVersion)
 	require.NoError(t, err)
 
 	return admin, token

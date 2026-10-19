@@ -6,10 +6,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/lorrc/service-desk-backend/internal/core/domain"
 	"github.com/lorrc/service-desk-backend/internal/core/ports"
-	"github.com/lorrc/service-desk-backend/internal/core/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -51,7 +49,7 @@ func TestTicketRepository_CreateGet(t *testing.T) {
 	assert.NotZero(t, createdTicket.ID)
 
 	// 3. Get the ticket by ID
-	foundTicket, err := ticketRepo.GetByID(ctx, createdTicket.ID)
+	foundTicket, err := ticketRepo.GetByID(ctx, createdTicket.ID, defaultOrgID)
 	require.NoError(t, err, "Failed to get ticket by ID")
 
 	// 4. Assert values are correct
@@ -77,56 +75,61 @@ func TestTicketRepository_PaginatedList(t *testing.T) {
 
 	// Test case 1: List all for user 1
 	params1 := ports.ListTicketsRepoParams{
-		RequesterID: pgtype.UUID{Bytes: user1.ID, Valid: true},
-		Limit:       10,
-		Offset:      0,
+		OrganizationID: defaultOrgID,
+		RequesterID:    &user1.ID,
+		Limit:          10,
+		Offset:         0,
 	}
-	tickets1, err := ticketRepo.ListByRequesterPaginated(ctx, params1)
+	tickets1, err := ticketRepo.ListPaginated(ctx, params1)
 	require.NoError(t, err)
 	assert.Len(t, tickets1, 3)
 
 	// Test case 2: List all for user 2
 	params2 := ports.ListTicketsRepoParams{
-		RequesterID: pgtype.UUID{Bytes: user2.ID, Valid: true},
-		Limit:       10,
-		Offset:      0,
+		OrganizationID: defaultOrgID,
+		RequesterID:    &user2.ID,
+		Limit:          10,
+		Offset:         0,
 	}
-	tickets2, err := ticketRepo.ListByRequesterPaginated(ctx, params2)
+	tickets2, err := ticketRepo.ListPaginated(ctx, params2)
 	require.NoError(t, err)
 	assert.Len(t, tickets2, 1)
 	assert.Equal(t, "T4", tickets2[0].Title)
 
 	// Test case 3: List with pagination (Limit 1, Offset 1) for user 1
 	params3 := ports.ListTicketsRepoParams{
-		RequesterID: pgtype.UUID{Bytes: user1.ID, Valid: true},
-		Limit:       1,
-		Offset:      1,
+		OrganizationID: defaultOrgID,
+		RequesterID:    &user1.ID,
+		Limit:          1,
+		Offset:         1,
 	}
-	tickets3, err := ticketRepo.ListByRequesterPaginated(ctx, params3)
+	tickets3, err := ticketRepo.ListPaginated(ctx, params3)
 	require.NoError(t, err)
 	assert.Len(t, tickets3, 1)
 	assert.Equal(t, "T2", tickets3[0].Title) // Ordered by created_at DESC
 
 	// Test case 4: List with filter (Priority: high) for user 1
 	params4 := ports.ListTicketsRepoParams{
-		RequesterID: pgtype.UUID{Bytes: user1.ID, Valid: true},
-		Limit:       10,
-		Offset:      0,
-		Priority:    utils.ToString(string(domain.PriorityHigh)),
+		OrganizationID: defaultOrgID,
+		RequesterID:    &user1.ID,
+		Limit:          10,
+		Offset:         0,
+		Priority:       pointer(string(domain.PriorityHigh)),
 	}
-	tickets4, err := ticketRepo.ListByRequesterPaginated(ctx, params4)
+	tickets4, err := ticketRepo.ListPaginated(ctx, params4)
 	require.NoError(t, err)
 	assert.Len(t, tickets4, 1)
 	assert.Equal(t, "T1", tickets4[0].Title)
 
 	// Test case 5: List with filter (Status: closed) for user 1
 	params5 := ports.ListTicketsRepoParams{
-		RequesterID: pgtype.UUID{Bytes: user1.ID, Valid: true},
-		Limit:       10,
-		Offset:      0,
-		Status:      utils.ToString(string(domain.StatusClosed)),
+		OrganizationID: defaultOrgID,
+		RequesterID:    &user1.ID,
+		Limit:          10,
+		Offset:         0,
+		Status:         pointer(string(domain.StatusClosed)),
 	}
-	tickets5, err := ticketRepo.ListByRequesterPaginated(ctx, params5)
+	tickets5, err := ticketRepo.ListPaginated(ctx, params5)
 	require.NoError(t, err)
 	assert.Len(t, tickets5, 1)
 	assert.Equal(t, "T3", tickets5[0].Title)
@@ -147,7 +150,7 @@ func TestTicketRepository_ListFilters(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, ticket1.Assign(assignee.ID))
-	_, err = ticketRepo.Update(ctx, ticket1)
+	_, err = ticketRepo.Update(ctx, ticket1, defaultOrgID)
 	require.NoError(t, err)
 
 	createdAt1 := time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC)
@@ -162,36 +165,41 @@ func TestTicketRepository_ListFilters(t *testing.T) {
 	require.NoError(t, err)
 
 	assigneeParams := ports.ListTicketsRepoParams{
-		RequesterID: pgtype.UUID{Bytes: requester.ID, Valid: true},
-		Limit:       10,
-		Offset:      0,
-		AssigneeID:  pgtype.UUID{Bytes: assignee.ID, Valid: true},
+		OrganizationID: defaultOrgID,
+		RequesterID:    &requester.ID,
+		Limit:          10,
+		Offset:         0,
+		AssigneeID:     &assignee.ID,
 	}
-	assigneeTickets, err := ticketRepo.ListByRequesterPaginated(ctx, assigneeParams)
+	assigneeTickets, err := ticketRepo.ListPaginated(ctx, assigneeParams)
 	require.NoError(t, err)
 	require.Len(t, assigneeTickets, 1)
 	assert.Equal(t, "T1", assigneeTickets[0].Title)
 
 	unassignedParams := ports.ListTicketsRepoParams{
-		RequesterID: pgtype.UUID{Bytes: requester.ID, Valid: true},
-		Limit:       10,
-		Offset:      0,
-		Unassigned:  pgtype.Bool{Bool: true, Valid: true},
+		OrganizationID: defaultOrgID,
+		RequesterID:    &requester.ID,
+		Limit:          10,
+		Offset:         0,
+		Unassigned:     true,
 	}
-	unassignedTickets, err := ticketRepo.ListByRequesterPaginated(ctx, unassignedParams)
+	unassignedTickets, err := ticketRepo.ListPaginated(ctx, unassignedParams)
 	require.NoError(t, err)
 	require.Len(t, unassignedTickets, 2)
 	assert.ElementsMatch(t, []string{"T2", "T3"}, []string{unassignedTickets[0].Title, unassignedTickets[1].Title})
 
 	dateParams := ports.ListTicketsRepoParams{
-		RequesterID: pgtype.UUID{Bytes: requester.ID, Valid: true},
-		Limit:       10,
-		Offset:      0,
-		CreatedFrom: pgtype.Timestamptz{Time: time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC), Valid: true},
-		CreatedTo:   pgtype.Timestamptz{Time: time.Date(2024, 1, 5, 0, 0, 0, 0, time.UTC), Valid: true},
+		OrganizationID: defaultOrgID,
+		RequesterID:    &requester.ID,
+		Limit:          10,
+		Offset:         0,
+		CreatedFrom:    pointer(time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)),
+		CreatedTo:      pointer(time.Date(2024, 1, 5, 0, 0, 0, 0, time.UTC)),
 	}
-	dateTickets, err := ticketRepo.ListByRequesterPaginated(ctx, dateParams)
+	dateTickets, err := ticketRepo.ListPaginated(ctx, dateParams)
 	require.NoError(t, err)
 	require.Len(t, dateTickets, 1)
 	assert.Equal(t, "T2", dateTickets[0].Title)
 }
+
+func pointer[T any](value T) *T { return &value }

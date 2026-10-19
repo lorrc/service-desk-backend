@@ -11,21 +11,10 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const countUsers = `-- name: CountUsers :one
-SELECT COUNT(*) FROM users
-`
-
-func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
-	row := q.db.QueryRow(ctx, countUsers)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (organization_id, full_name, email, hashed_password)
 VALUES ($1, $2, $3, $4)
-    RETURNING id, organization_id, full_name, email, hashed_password, created_at, is_active, last_active_at
+    RETURNING id, organization_id, full_name, email, hashed_password, created_at, is_active, last_active_at, session_version
 `
 
 type CreateUserParams struct {
@@ -52,12 +41,13 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.CreatedAt,
 		&i.IsActive,
 		&i.LastActiveAt,
+		&i.SessionVersion,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, organization_id, full_name, email, hashed_password, created_at, is_active, last_active_at FROM users
+SELECT id, organization_id, full_name, email, hashed_password, created_at, is_active, last_active_at, session_version FROM users
 WHERE email = $1 LIMIT 1
 `
 
@@ -73,12 +63,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.CreatedAt,
 		&i.IsActive,
 		&i.LastActiveAt,
+		&i.SessionVersion,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, organization_id, full_name, email, hashed_password, created_at, is_active, last_active_at FROM users
+SELECT id, organization_id, full_name, email, hashed_password, created_at, is_active, last_active_at, session_version FROM users
 WHERE id = $1 LIMIT 1
 `
 
@@ -94,6 +85,63 @@ func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 		&i.CreatedAt,
 		&i.IsActive,
 		&i.LastActiveAt,
+		&i.SessionVersion,
 	)
 	return i, err
+}
+
+const getUserInfo = `-- name: GetUserInfo :many
+SELECT id, full_name, email FROM users
+WHERE organization_id = $1 AND id = ANY($2::uuid[])
+`
+
+type GetUserInfoParams struct {
+	OrganizationID pgtype.UUID   `json:"organization_id"`
+	Column2        []pgtype.UUID `json:"column_2"`
+}
+
+type GetUserInfoRow struct {
+	ID       pgtype.UUID `json:"id"`
+	FullName string      `json:"full_name"`
+	Email    string      `json:"email"`
+}
+
+func (q *Queries) GetUserInfo(ctx context.Context, arg GetUserInfoParams) ([]GetUserInfoRow, error) {
+	rows, err := q.db.Query(ctx, getUserInfo, arg.OrganizationID, arg.Column2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetUserInfoRow
+	for rows.Next() {
+		var i GetUserInfoRow
+		if err := rows.Scan(&i.ID, &i.FullName, &i.Email); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const validateSession = `-- name: ValidateSession :one
+SELECT EXISTS (
+  SELECT 1 FROM users
+  WHERE id = $1 AND organization_id = $2 AND session_version = $3 AND is_active
+)
+`
+
+type ValidateSessionParams struct {
+	ID             pgtype.UUID `json:"id"`
+	OrganizationID pgtype.UUID `json:"organization_id"`
+	SessionVersion int64       `json:"session_version"`
+}
+
+func (q *Queries) ValidateSession(ctx context.Context, arg ValidateSessionParams) (bool, error) {
+	row := q.db.QueryRow(ctx, validateSession, arg.ID, arg.OrganizationID, arg.SessionVersion)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }

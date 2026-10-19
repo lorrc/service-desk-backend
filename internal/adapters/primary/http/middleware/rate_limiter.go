@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -11,11 +10,12 @@ import (
 
 // RateLimiter provides IP-based rate limiting
 type RateLimiter struct {
-	visitors map[string]*visitor
-	mu       sync.RWMutex
-	rate     rate.Limit
-	burst    int
-	cleanup  time.Duration
+	visitors  map[string]*visitor
+	mu        sync.RWMutex
+	rate      rate.Limit
+	burst     int
+	stop      chan struct{}
+	closeOnce sync.Once
 }
 
 type visitor struct {
@@ -57,7 +57,7 @@ func NewRateLimiter(cfg RateLimiterConfig) *RateLimiter {
 		visitors: make(map[string]*visitor),
 		rate:     rate.Limit(cfg.RequestsPerSecond),
 		burst:    cfg.BurstSize,
-		cleanup:  cfg.TTL,
+		stop:     make(chan struct{}),
 	}
 
 	// Start background cleanup goroutine
@@ -87,7 +87,12 @@ func (rl *RateLimiter) cleanupVisitors(interval, ttl time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	for range ticker.C {
+	for {
+		select {
+		case <-rl.stop:
+			return
+		case <-ticker.C:
+		}
 		rl.mu.Lock()
 		for ip, v := range rl.visitors {
 			if time.Since(v.lastSeen) > ttl {
@@ -97,6 +102,9 @@ func (rl *RateLimiter) cleanupVisitors(interval, ttl time.Duration) {
 		rl.mu.Unlock()
 	}
 }
+
+// Close stops the background cleanup worker.
+func (rl *RateLimiter) Close() { rl.closeOnce.Do(func() { close(rl.stop) }) }
 
 // Allow checks if a request from the given IP is allowed
 func (rl *RateLimiter) Allow(ip string) bool {
@@ -118,33 +126,6 @@ func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
-}
-
-// getClientIP extracts the client IP from the request
-// It checks X-Forwarded-For and X-Real-IP headers first (for reverse proxies)
-func getClientIP(r *http.Request) string {
-	// Check X-Forwarded-For header
-	xff := r.Header.Get("X-Forwarded-For")
-	if xff != "" {
-		// Take the first IP in the list
-		if ip, _, err := net.SplitHostPort(xff); err == nil {
-			return ip
-		}
-		return xff
-	}
-
-	// Check X-Real-IP header
-	xri := r.Header.Get("X-Real-IP")
-	if xri != "" {
-		return xri
-	}
-
-	// Fall back to RemoteAddr
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return ip
 }
 
 // RateLimitByKey provides rate limiting by arbitrary keys (e.g., user ID, API key)

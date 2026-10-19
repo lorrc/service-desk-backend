@@ -48,6 +48,7 @@ type User struct {
 	CreatedAt      time.Time
 	IsActive       bool
 	LastActiveAt   *time.Time
+	SessionVersion int64
 }
 
 type UserSummary struct {

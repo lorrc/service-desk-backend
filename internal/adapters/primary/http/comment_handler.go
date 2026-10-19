@@ -74,12 +74,12 @@ func (r *CreateCommentRequest) Validate() error {
 
 // CommentDTO defines the JSON response for comments.
 type CommentDTO struct {
-	ID        string `json:"id"`
-	TicketID  int64  `json:"ticketId"`
-	AuthorID  string `json:"authorId"`
+	ID        string       `json:"id"`
+	TicketID  int64        `json:"ticketId"`
+	AuthorID  string       `json:"authorId"`
 	Author    *UserInfoDTO `json:"author,omitempty"`
-	Body      string `json:"body"`
-	CreatedAt string `json:"createdAt"`
+	Body      string       `json:"body"`
+	CreatedAt string       `json:"createdAt"`
 }
 
 func toCommentDTO(comment *domain.Comment, userInfoByID map[uuid.UUID]UserInfoDTO) CommentDTO {
@@ -134,9 +134,10 @@ func (h *CommentHandler) HandleCreateComment(w http.ResponseWriter, r *http.Requ
 	}
 
 	params := ports.CreateCommentParams{
-		TicketID: ticketID,
-		ActorID:  claims.UserID,
-		Body:     req.Body,
+		OrganizationID: claims.OrgID,
+		TicketID:       ticketID,
+		ActorID:        claims.UserID,
+		Body:           req.Body,
 	}
 
 	comment, err := h.commentService.CreateComment(r.Context(), params)
@@ -179,8 +180,9 @@ func (h *CommentHandler) HandleListComments(w http.ResponseWriter, r *http.Reque
 	}
 
 	params := ports.GetCommentsParams{
-		TicketID: ticketID,
-		ActorID:  claims.UserID,
+		OrganizationID: claims.OrgID,
+		TicketID:       ticketID,
+		ActorID:        claims.UserID,
 	}
 
 	comments, err := h.commentService.GetCommentsForTicket(r.Context(), params)

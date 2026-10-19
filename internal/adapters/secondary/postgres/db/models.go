@@ -68,6 +68,7 @@ type User struct {
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	IsActive       bool               `json:"is_active"`
 	LastActiveAt   pgtype.Timestamptz `json:"last_active_at"`
+	SessionVersion int64              `json:"session_version"`
 }
 
 type UserRole struct {

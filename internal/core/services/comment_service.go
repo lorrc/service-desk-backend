@@ -45,10 +45,10 @@ func NewCommentService(
 
 // canUserAccessTicket is a helper to check if a user can view a ticket,
 // which is a prerequisite for viewing or making comments.
-func (s *CommentService) canUserAccessTicket(ctx context.Context, ticketID int64, actorID uuid.UUID) (bool, error) {
+func (s *CommentService) canUserAccessTicket(ctx context.Context, ticketID int64, actorID, orgID uuid.UUID) (bool, error) {
 	// We re-use the GetTicket service method, as it already contains
 	// the necessary ownership and RBAC logic ("tickets:read", "tickets:read:all").
-	_, err := s.ticketSvc.GetTicket(ctx, ticketID, actorID)
+	_, err := s.ticketSvc.GetTicket(ctx, ticketID, actorID, orgID)
 	if err != nil {
 		if errors.Is(err, apperrors.ErrForbidden) || errors.Is(err, apperrors.ErrTicketNotFound) {
 			return false, apperrors.ErrForbidden // Return a generic Forbidden
@@ -71,7 +71,7 @@ func (s *CommentService) CreateComment(ctx context.Context, params ports.CreateC
 
 	// 2. Check if the user can access the ticket they're trying to comment on.
 	// We use GetTicket directly here to fetch the ticket object for the notification.
-	ticket, err := s.ticketSvc.GetTicket(ctx, params.TicketID, params.ActorID)
+	ticket, err := s.ticketSvc.GetTicket(ctx, params.TicketID, params.ActorID, params.OrganizationID)
 	if err != nil {
 		// GetTicket already returns ErrForbidden if access is denied
 		return nil, err
@@ -144,7 +144,7 @@ func (s *CommentService) GetCommentsForTicket(ctx context.Context, params ports.
 	}
 
 	// 2. Check if the user can access the ticket to read its comments.
-	canAccess, err := s.canUserAccessTicket(ctx, params.TicketID, params.ActorID)
+	canAccess, err := s.canUserAccessTicket(ctx, params.TicketID, params.ActorID, params.OrganizationID)
 	if err != nil {
 		return nil, err
 	}
