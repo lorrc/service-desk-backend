@@ -14,7 +14,7 @@ import (
 // Password validation constants
 const (
 	MinPasswordLength = 8
-	MaxPasswordLength = 128
+	MaxPasswordLength = 72
 	MaxFullNameLength = 255
 	MaxEmailLength    = 255
 )
@@ -113,7 +113,7 @@ func ValidatePassword(password string) []string {
 	}
 
 	if len(password) > MaxPasswordLength {
-		errors = append(errors, "Password must be 128 characters or less")
+		errors = append(errors, "Password must be 72 bytes or less")
 	}
 
 	var (

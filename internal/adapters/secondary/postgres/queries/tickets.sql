@@ -26,6 +26,8 @@ SELECT t.* FROM tickets t
 JOIN users u ON u.id = t.requester_id
 WHERE u.organization_id = sqlc.arg('organization_id')
   AND (t.requester_id = sqlc.narg('requester_id') OR sqlc.narg('requester_id') IS NULL)
+  AND (NOT sqlc.arg('active')::boolean OR t.status <> 'CLOSED')
+  AND (sqlc.arg('search')::text = '' OR strpos(lower(t.title || ' ' || coalesce(t.description, '') || ' ' || t.id::text), lower(sqlc.arg('search')::text)) > 0)
   AND (t.status = sqlc.narg('status') OR sqlc.narg('status') IS NULL)
   AND (t.priority = sqlc.narg('priority') OR sqlc.narg('priority') IS NULL)
   AND (NOT sqlc.arg('unassigned')::boolean OR t.assignee_id IS NULL)
@@ -37,6 +39,9 @@ LIMIT sqlc.arg('limit') OFFSET sqlc.arg('offset');
 
 -- name: GetTicketCounts :one
 SELECT
+  COUNT(*) AS all,
+  COUNT(*) FILTER (WHERE t.assignee_id IS NULL) AS unassigned,
+  COUNT(*) FILTER (WHERE t.assignee_id = sqlc.arg('viewer_id')) AS assigned_to_me,
   COUNT(*) FILTER (WHERE t.status = 'OPEN') AS open,
   COUNT(*) FILTER (WHERE t.status = 'IN_PROGRESS') AS in_progress,
   COUNT(*) FILTER (WHERE t.status = 'CLOSED') AS closed,
@@ -44,4 +49,7 @@ SELECT
 FROM tickets t
 JOIN users u ON u.id = t.requester_id
 WHERE u.organization_id = sqlc.arg('organization_id')
-  AND (t.requester_id = sqlc.narg('requester_id') OR sqlc.narg('requester_id') IS NULL);
+  AND (t.requester_id = sqlc.narg('requester_id') OR sqlc.narg('requester_id') IS NULL)
+  AND (sqlc.arg('search')::text = '' OR strpos(lower(t.title || ' ' || coalesce(t.description, '') || ' ' || t.id::text), lower(sqlc.arg('search')::text)) > 0)
+  AND (t.created_at >= sqlc.narg('created_from') OR sqlc.narg('created_from') IS NULL)
+  AND (t.created_at < sqlc.narg('created_to') OR sqlc.narg('created_to') IS NULL);

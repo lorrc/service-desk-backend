@@ -162,8 +162,8 @@ func (r *TicketRepository) GetForUpdate(ctx context.Context, id int64, orgID uui
 func (r *TicketRepository) ListPaginated(ctx context.Context, params ports.ListTicketsRepoParams) ([]*domain.Ticket, error) {
 	rows, err := db.New(GetDBTX(ctx, r.pool)).ListTicketsPaginated(ctx, db.ListTicketsPaginatedParams{
 		OrganizationID: pgtype.UUID{Bytes: params.OrganizationID, Valid: true},
-		RequesterID:    nullableUUID(params.RequesterID),
-		Limit:          int32(params.Limit), Offset: int32(params.Offset),
+		RequesterID:    nullableUUID(params.RequesterID), Active: params.Active, Search: params.Query,
+		Limit: int32(params.Limit), Offset: int32(params.Offset),
 		Status: nullableText(params.Status), Priority: nullableText(params.Priority),
 		AssigneeID: nullableUUID(params.AssigneeID), Unassigned: params.Unassigned,
 		CreatedFrom: nullableTime(params.CreatedFrom), CreatedTo: nullableTime(params.CreatedTo),
@@ -175,14 +175,14 @@ func (r *TicketRepository) ListPaginated(ctx context.Context, params ports.ListT
 }
 
 // GetCounts aggregates the complete authorized ticket set.
-func (r *TicketRepository) GetCounts(ctx context.Context, orgID uuid.UUID, requesterID *uuid.UUID) (*domain.TicketCounts, error) {
+func (r *TicketRepository) GetCounts(ctx context.Context, params ports.TicketCountsRepoParams) (*domain.TicketCounts, error) {
 	counts, err := db.New(GetDBTX(ctx, r.pool)).GetTicketCounts(ctx, db.GetTicketCountsParams{
-		OrganizationID: pgtype.UUID{Bytes: orgID, Valid: true}, RequesterID: nullableUUID(requesterID),
+		OrganizationID: pgtype.UUID{Bytes: params.OrganizationID, Valid: true}, RequesterID: nullableUUID(params.RequesterID), ViewerID: pgtype.UUID{Bytes: params.ViewerID, Valid: true}, Search: params.Query, CreatedFrom: nullableTime(params.CreatedFrom), CreatedTo: nullableTime(params.CreatedTo),
 	})
 	if err != nil {
 		return nil, err
 	}
-	return &domain.TicketCounts{Open: counts.Open, InProgress: counts.InProgress, Closed: counts.Closed, HighPriority: counts.HighPriority}, nil
+	return &domain.TicketCounts{All: counts.All, Unassigned: counts.Unassigned, AssignedToMe: counts.AssignedToMe, Open: counts.Open, InProgress: counts.InProgress, Closed: counts.Closed, HighPriority: counts.HighPriority}, nil
 }
 
 func nullableUUID(id *uuid.UUID) pgtype.UUID {

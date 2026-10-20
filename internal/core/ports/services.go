@@ -28,7 +28,7 @@ type AssigneeService interface {
 
 // AdminService defines the port for admin-only operations.
 type AdminService interface {
-	ListUsers(ctx context.Context, actorID, orgID uuid.UUID) ([]*domain.UserSummary, error)
+	ListUsersPage(ctx context.Context, params ListUsersParams) ([]*domain.UserSummary, error)
 	UpdateUserRole(ctx context.Context, actorID, orgID, userID uuid.UUID, role string) error
 	UpdateUserStatus(ctx context.Context, actorID, orgID, userID uuid.UUID, isActive bool) error
 	ResetUserPassword(ctx context.Context, actorID, orgID, userID uuid.UUID) (string, error)
@@ -82,6 +82,8 @@ type GetCommentsParams struct {
 
 // ListTicketsParams defines the input for listing tickets.
 type ListTicketsParams struct {
+	Query          string
+	Active         bool
 	OrganizationID uuid.UUID
 	ViewerID       uuid.UUID
 	Limit          int
@@ -96,6 +98,8 @@ type ListTicketsParams struct {
 
 // ListTicketEventsParams defines the input for listing ticket events.
 type ListTicketEventsParams struct {
+	BeforeID       int64
+	Backward       bool
 	OrganizationID uuid.UUID
 	TicketID       int64
 	ViewerID       uuid.UUID
@@ -118,7 +122,7 @@ type TicketService interface {
 	UpdateStatus(ctx context.Context, params UpdateStatusParams) (*domain.Ticket, error)
 	AssignTicket(ctx context.Context, params AssignTicketParams) (*domain.Ticket, error)
 	ListTickets(ctx context.Context, params ListTicketsParams) ([]*domain.Ticket, error)
-	GetTicketCounts(ctx context.Context, viewerID, orgID uuid.UUID) (*domain.TicketCounts, error)
+	GetTicketCounts(ctx context.Context, params TicketCountsParams) (*domain.TicketCounts, error)
 	Shutdown()
 }
 
@@ -141,4 +145,20 @@ type Notifier interface {
 // TransactionManager defines the port for running atomic operations.
 type TransactionManager interface {
 	WithTransaction(ctx context.Context, fn func(ctx context.Context) error) error
+}
+
+// TicketCountsParams supplies baseline filters without an individual triage tab.
+type TicketCountsParams struct {
+	OrganizationID uuid.UUID
+	ViewerID       uuid.UUID
+	Query          string
+	CreatedFrom    *time.Time
+	CreatedTo      *time.Time
+}
+
+// AccountService provides authenticated self-service account operations.
+type AccountService interface {
+	Profile(ctx context.Context, userID, orgID uuid.UUID, version int64) (*domain.Profile, error)
+	ChangePassword(ctx context.Context, userID, orgID uuid.UUID, version int64, currentPassword, newPassword string) error
+	SignOutEverywhere(ctx context.Context, userID, orgID uuid.UUID, version int64) error
 }

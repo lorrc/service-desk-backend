@@ -25,6 +25,7 @@ type Querier interface {
 	GetUserPermissions(ctx context.Context, userID pgtype.UUID) ([]string, error)
 	ListCommentsByTicketID(ctx context.Context, ticketID int64) ([]Comment, error)
 	ListTicketEvents(ctx context.Context, arg ListTicketEventsParams) ([]TicketEvent, error)
+	ListTicketHistory(ctx context.Context, arg ListTicketHistoryParams) ([]TicketEvent, error)
 	ListTicketsPaginated(ctx context.Context, arg ListTicketsPaginatedParams) ([]Ticket, error)
 	UpdateTicket(ctx context.Context, arg UpdateTicketParams) (Ticket, error)
 	ValidateSession(ctx context.Context, arg ValidateSessionParams) (bool, error)

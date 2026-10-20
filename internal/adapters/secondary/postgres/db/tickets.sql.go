@@ -80,22 +80,35 @@ func (q *Queries) GetTicketByID(ctx context.Context, arg GetTicketByIDParams) (T
 
 const getTicketCounts = `-- name: GetTicketCounts :one
 SELECT
+  COUNT(*) AS all,
+  COUNT(*) FILTER (WHERE t.assignee_id IS NULL) AS unassigned,
+  COUNT(*) FILTER (WHERE t.assignee_id = $1) AS assigned_to_me,
   COUNT(*) FILTER (WHERE t.status = 'OPEN') AS open,
   COUNT(*) FILTER (WHERE t.status = 'IN_PROGRESS') AS in_progress,
   COUNT(*) FILTER (WHERE t.status = 'CLOSED') AS closed,
   COUNT(*) FILTER (WHERE t.priority = 'HIGH' AND t.status <> 'CLOSED') AS high_priority
 FROM tickets t
 JOIN users u ON u.id = t.requester_id
-WHERE u.organization_id = $1
-  AND (t.requester_id = $2 OR $2 IS NULL)
+WHERE u.organization_id = $2
+  AND (t.requester_id = $3 OR $3 IS NULL)
+  AND ($4::text = '' OR strpos(lower(t.title || ' ' || coalesce(t.description, '') || ' ' || t.id::text), lower($4::text)) > 0)
+  AND (t.created_at >= $5 OR $5 IS NULL)
+  AND (t.created_at < $6 OR $6 IS NULL)
 `
 
 type GetTicketCountsParams struct {
-	OrganizationID pgtype.UUID `json:"organization_id"`
-	RequesterID    pgtype.UUID `json:"requester_id"`
+	ViewerID       pgtype.UUID        `json:"viewer_id"`
+	OrganizationID pgtype.UUID        `json:"organization_id"`
+	RequesterID    pgtype.UUID        `json:"requester_id"`
+	Search         string             `json:"search"`
+	CreatedFrom    pgtype.Timestamptz `json:"created_from"`
+	CreatedTo      pgtype.Timestamptz `json:"created_to"`
 }
 
 type GetTicketCountsRow struct {
+	All          int64 `json:"all"`
+	Unassigned   int64 `json:"unassigned"`
+	AssignedToMe int64 `json:"assigned_to_me"`
 	Open         int64 `json:"open"`
 	InProgress   int64 `json:"in_progress"`
 	Closed       int64 `json:"closed"`
@@ -103,9 +116,19 @@ type GetTicketCountsRow struct {
 }
 
 func (q *Queries) GetTicketCounts(ctx context.Context, arg GetTicketCountsParams) (GetTicketCountsRow, error) {
-	row := q.db.QueryRow(ctx, getTicketCounts, arg.OrganizationID, arg.RequesterID)
+	row := q.db.QueryRow(ctx, getTicketCounts,
+		arg.ViewerID,
+		arg.OrganizationID,
+		arg.RequesterID,
+		arg.Search,
+		arg.CreatedFrom,
+		arg.CreatedTo,
+	)
 	var i GetTicketCountsRow
 	err := row.Scan(
+		&i.All,
+		&i.Unassigned,
+		&i.AssignedToMe,
 		&i.Open,
 		&i.InProgress,
 		&i.Closed,
@@ -149,19 +172,23 @@ SELECT t.id, t.title, t.description, t.status, t.priority, t.requester_id, t.ass
 JOIN users u ON u.id = t.requester_id
 WHERE u.organization_id = $1
   AND (t.requester_id = $2 OR $2 IS NULL)
-  AND (t.status = $3 OR $3 IS NULL)
-  AND (t.priority = $4 OR $4 IS NULL)
-  AND (NOT $5::boolean OR t.assignee_id IS NULL)
-  AND (t.assignee_id = $6 OR $6 IS NULL)
-  AND (t.created_at >= $7 OR $7 IS NULL)
-  AND (t.created_at < $8 OR $8 IS NULL)
+  AND (NOT $3::boolean OR t.status <> 'CLOSED')
+  AND ($4::text = '' OR strpos(lower(t.title || ' ' || coalesce(t.description, '') || ' ' || t.id::text), lower($4::text)) > 0)
+  AND (t.status = $5 OR $5 IS NULL)
+  AND (t.priority = $6 OR $6 IS NULL)
+  AND (NOT $7::boolean OR t.assignee_id IS NULL)
+  AND (t.assignee_id = $8 OR $8 IS NULL)
+  AND (t.created_at >= $9 OR $9 IS NULL)
+  AND (t.created_at < $10 OR $10 IS NULL)
 ORDER BY t.created_at DESC, t.id DESC
-LIMIT $10 OFFSET $9
+LIMIT $12 OFFSET $11
 `
 
 type ListTicketsPaginatedParams struct {
 	OrganizationID pgtype.UUID        `json:"organization_id"`
 	RequesterID    pgtype.UUID        `json:"requester_id"`
+	Active         bool               `json:"active"`
+	Search         string             `json:"search"`
 	Status         pgtype.Text        `json:"status"`
 	Priority       pgtype.Text        `json:"priority"`
 	Unassigned     bool               `json:"unassigned"`
@@ -176,6 +203,8 @@ func (q *Queries) ListTicketsPaginated(ctx context.Context, arg ListTicketsPagin
 	rows, err := q.db.Query(ctx, listTicketsPaginated,
 		arg.OrganizationID,
 		arg.RequesterID,
+		arg.Active,
+		arg.Search,
 		arg.Status,
 		arg.Priority,
 		arg.Unassigned,

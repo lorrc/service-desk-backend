@@ -183,7 +183,8 @@ ORDER BY u.full_name, u.email
 	return users, nil
 }
 
-func (r *UserRepository) ListByOrganization(ctx context.Context, orgID uuid.UUID) ([]*domain.UserSummary, error) {
+// ListUsersPage applies directory filters before limiting the result.
+func (r *UserRepository) ListUsersPage(ctx context.Context, params ports.ListUsersParams) ([]*domain.UserSummary, error) {
 	const listUsers = `
 SELECT u.id,
        u.organization_id,
@@ -197,11 +198,15 @@ FROM users u
 LEFT JOIN user_roles ur ON u.id = ur.user_id
 LEFT JOIN roles r ON ur.role_id = r.id
 WHERE u.organization_id = $1
+ AND ($2::text = '' OR strpos(lower(u.full_name || ' ' || u.email), lower($2::text)) > 0)
+ AND ($3::text = '' OR EXISTS (SELECT 1 FROM user_roles urf JOIN roles rf ON rf.id = urf.role_id WHERE urf.user_id = u.id AND rf.name = $3))
+ AND ($4::boolean IS NULL OR u.is_active = $4)
 GROUP BY u.id
-ORDER BY u.full_name, u.email
+ORDER BY u.full_name, u.email, u.id
+LIMIT $5 OFFSET $6
 `
 
-	rows, err := r.pool.Query(ctx, listUsers, pgtype.UUID{Bytes: orgID, Valid: true})
+	rows, err := GetDBTX(ctx, r.pool).Query(ctx, listUsers, params.OrganizationID, params.Query, params.Role, params.IsActive, params.Limit, params.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -285,6 +290,48 @@ func (r *UserRepository) UpdateLastActive(ctx context.Context, userID uuid.UUID,
 	}
 	if tag.RowsAffected() == 0 {
 		return apperrors.ErrUserNotFound
+	}
+	return nil
+}
+
+// GetRoles reads role names only within the authenticated organization.
+func (r *UserRepository) GetRoles(ctx context.Context, userID, orgID uuid.UUID) ([]string, error) {
+	rows, err := GetDBTX(ctx, r.pool).Query(ctx, `SELECT r.name FROM roles r JOIN user_roles ur ON ur.role_id = r.id JOIN users u ON u.id = ur.user_id WHERE u.id = $1 AND u.organization_id = $2 ORDER BY r.name`, userID, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	roles := []string{}
+	for rows.Next() {
+		var role string
+		if err := rows.Scan(&role); err != nil {
+			return nil, err
+		}
+		roles = append(roles, role)
+	}
+	return roles, rows.Err()
+}
+
+// ChangeOwnPassword atomically changes the verified password and revokes all sessions.
+func (r *UserRepository) ChangeOwnPassword(ctx context.Context, userID, orgID uuid.UUID, version int64, oldHash, newHash string) error {
+	tag, err := GetDBTX(ctx, r.pool).Exec(ctx, `UPDATE users SET hashed_password = $5, session_version = session_version + 1 WHERE id = $1 AND organization_id = $2 AND session_version = $3 AND hashed_password = $4 AND is_active`, userID, orgID, version, oldHash, newHash)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return apperrors.ErrUnauthorized
+	}
+	return nil
+}
+
+// RevokeSessions revokes every session, including the caller's current token.
+func (r *UserRepository) RevokeSessions(ctx context.Context, userID, orgID uuid.UUID, version int64) error {
+	tag, err := GetDBTX(ctx, r.pool).Exec(ctx, `UPDATE users SET session_version = session_version + 1 WHERE id = $1 AND organization_id = $2 AND session_version = $3 AND is_active`, userID, orgID, version)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return apperrors.ErrUnauthorized
 	}
 	return nil
 }

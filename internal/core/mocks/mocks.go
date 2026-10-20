@@ -68,14 +68,6 @@ func (m *MockUserRepository) ListAssignableUsers(ctx context.Context, orgID uuid
 	return args.Get(0).([]*domain.User), args.Error(1)
 }
 
-func (m *MockUserRepository) ListByOrganization(ctx context.Context, orgID uuid.UUID) ([]*domain.UserSummary, error) {
-	args := m.Called(ctx, orgID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]*domain.UserSummary), args.Error(1)
-}
-
 func (m *MockUserRepository) SetActive(ctx context.Context, userID uuid.UUID, isActive bool) error {
 	args := m.Called(ctx, userID, isActive)
 	return args.Error(0)
@@ -140,8 +132,8 @@ func (m *MockTicketRepository) GetForUpdate(ctx context.Context, id int64, orgID
 	return args.Get(0).(*domain.Ticket), args.Error(1)
 }
 
-func (m *MockTicketRepository) GetCounts(ctx context.Context, orgID uuid.UUID, requesterID *uuid.UUID) (*domain.TicketCounts, error) {
-	args := m.Called(ctx, orgID, requesterID)
+func (m *MockTicketRepository) GetCounts(ctx context.Context, params ports.TicketCountsRepoParams) (*domain.TicketCounts, error) {
+	args := m.Called(ctx, params)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -332,10 +324,38 @@ func (m *MockTransactionManager) WithTransaction(ctx context.Context, fn func(ct
 	return args.Error(0)
 }
 
-func (m *MockTicketService) GetTicketCounts(ctx context.Context, viewerID, orgID uuid.UUID) (*domain.TicketCounts, error) {
-	args := m.Called(ctx, viewerID, orgID)
+func (m *MockTicketService) GetTicketCounts(ctx context.Context, params ports.TicketCountsParams) (*domain.TicketCounts, error) {
+	args := m.Called(ctx, params)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
 	return args.Get(0).(*domain.TicketCounts), args.Error(1)
+}
+
+func (m *MockUserRepository) ListUsersPage(ctx context.Context, params ports.ListUsersParams) ([]*domain.UserSummary, error) {
+	args := m.Called(ctx, params)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*domain.UserSummary), args.Error(1)
+}
+func (m *MockUserRepository) GetRoles(ctx context.Context, userID, orgID uuid.UUID) ([]string, error) {
+	args := m.Called(ctx, userID, orgID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]string), args.Error(1)
+}
+func (m *MockUserRepository) ChangeOwnPassword(ctx context.Context, userID, orgID uuid.UUID, version int64, oldHash, newHash string) error {
+	return m.Called(ctx, userID, orgID, version, oldHash, newHash).Error(0)
+}
+func (m *MockUserRepository) RevokeSessions(ctx context.Context, userID, orgID uuid.UUID, version int64) error {
+	return m.Called(ctx, userID, orgID, version).Error(0)
+}
+func (m *MockTicketEventRepository) ListHistory(ctx context.Context, ticketID, beforeID int64, limit int) ([]*domain.Event, error) {
+	args := m.Called(ctx, ticketID, beforeID, limit)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*domain.Event), args.Error(1)
 }

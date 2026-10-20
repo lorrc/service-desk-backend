@@ -33,5 +33,8 @@ func (s *EventService) ListTicketEvents(ctx context.Context, params ports.ListTi
 		return nil, err
 	}
 
+	if params.Backward {
+		return s.eventRepo.ListHistory(ctx, params.TicketID, params.BeforeID, params.Limit)
+	}
 	return s.eventRepo.ListByTicketID(ctx, params.TicketID, params.AfterID, params.Limit)
 }

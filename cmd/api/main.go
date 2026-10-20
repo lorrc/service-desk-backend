@@ -149,7 +149,7 @@ func run() error {
 	}
 
 	authHandler := httpAdapter.NewAuthHandler(authService, tokenManager, errorHandler, logger)
-	meHandler := httpAdapter.NewMeHandler(authzService, errorHandler, logger)
+	meHandler := httpAdapter.NewMeHandler(authzService, services.NewAccountService(userRepo, authzService), errorHandler, logger)
 	assigneeHandler := httpAdapter.NewAssigneeHandler(assigneeService, errorHandler, logger)
 	adminHandler := httpAdapter.NewAdminHandler(adminService, errorHandler, logger)
 	commentHandler := httpAdapter.NewCommentHandler(commentService, userLookupService, errorHandler, logger)

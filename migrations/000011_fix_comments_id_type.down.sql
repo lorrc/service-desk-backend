@@ -1,28 +1,11 @@
 DO $$
 BEGIN
-  IF EXISTS (
-    SELECT 1
-    FROM information_schema.columns
-    WHERE table_name = 'comments'
-      AND column_name = 'id'
-      AND data_type = 'bigint'
-  ) THEN
-    ALTER TABLE comments ADD COLUMN IF NOT EXISTS id_uuid UUID;
-
-    UPDATE comments
-    SET id_uuid = md5(random()::text || clock_timestamp()::text || id::text)::uuid
-    WHERE id_uuid IS NULL;
-
-    ALTER TABLE comments ALTER COLUMN id_uuid SET DEFAULT (
-      md5(random()::text || clock_timestamp()::text)::uuid
-    );
-
-    ALTER TABLE comments DROP CONSTRAINT IF EXISTS comments_pkey;
-    ALTER TABLE comments DROP COLUMN id;
-    ALTER TABLE comments RENAME COLUMN id_uuid TO id;
-    ALTER TABLE comments ADD PRIMARY KEY (id);
-
-    DROP SEQUENCE IF EXISTS comments_id_bigint_seq;
-    DROP SEQUENCE IF EXISTS comments_id_seq;
+  -- Migration 3 already uses BIGSERIAL, so the canonical schema needs no undo.
+  -- UUID conversions, including conversions made by earlier releases of this
+  -- migration, own this distinct sequence and discarded the original UUIDs.
+  IF to_regclass(pg_get_serial_sequence('comments', 'id')) =
+     to_regclass('comments_id_bigint_seq') THEN
+    RAISE EXCEPTION
+      'Migration 11 converted legacy UUID comment IDs and is irreversible. Restore a pre-conversion backup to recover the original UUIDs.';
   END IF;
 END $$;

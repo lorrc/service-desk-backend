@@ -48,6 +48,8 @@ func newReviewRouter(t *testing.T) stdhttp.Handler {
 	router.Use(mw.JWTMiddleware(auth.NewTokenManager("test-secret", time.Hour), users))
 	router.Route("/tickets", ticketHandler.RegisterRoutes)
 	router.Route("/admin", adminHandler.RegisterRoutes)
+	meHandler := NewMeHandler(permissions, services.NewAccountService(users, permissions), errors, logger)
+	router.Route("/me", meHandler.RegisterRoutes)
 	return router
 }
 

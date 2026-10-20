@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -42,7 +43,20 @@ func mapDBTicketEventToDomain(dbEvent db.TicketEvent) *domain.Event {
 
 // Create persists a new ticket event.
 func (r *TicketEventRepository) Create(ctx context.Context, event *domain.Event) (*domain.Event, error) {
-	q := db.New(GetDBTX(ctx, r.pool))
+	tx, ok := TxFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("ticket event creation requires a transaction")
+	}
+	if event.TicketID < 1 {
+		return nil, fmt.Errorf("ticket event requires a positive ticket ID")
+	}
+	// Sequence IDs alone do not guarantee commit order. Serialize allocation for
+	// this ticket until commit so a polling cursor cannot skip a late commit.
+	// Negative bigint keys reserve this namespace separately from migration locks.
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(-$1::bigint)", event.TicketID); err != nil {
+		return nil, fmt.Errorf("lock ticket event order: %w", err)
+	}
+	q := db.New(tx)
 	params := db.CreateTicketEventParams{
 		TicketID: event.TicketID,
 		Type:     string(event.Type),
@@ -77,5 +91,18 @@ func (r *TicketEventRepository) ListByTicketID(ctx context.Context, ticketID int
 		events = append(events, mapDBTicketEventToDomain(dbEvent))
 	}
 
+	return events, nil
+}
+
+// ListHistory retrieves a bounded page of older events, newest first.
+func (r *TicketEventRepository) ListHistory(ctx context.Context, ticketID, beforeID int64, limit int) ([]*domain.Event, error) {
+	rows, err := db.New(GetDBTX(ctx, r.pool)).ListTicketHistory(ctx, db.ListTicketHistoryParams{TicketID: ticketID, ID: beforeID, Limit: int32(limit)})
+	if err != nil {
+		return nil, err
+	}
+	events := make([]*domain.Event, 0, len(rows))
+	for _, row := range rows {
+		events = append(events, mapDBTicketEventToDomain(row))
+	}
 	return events, nil
 }

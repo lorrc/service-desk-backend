@@ -3,6 +3,7 @@ package http
 import (
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -77,7 +78,24 @@ func (h *AdminHandler) HandleListUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	users, err := h.adminService.ListUsers(r.Context(), claims.UserID, claims.OrgID)
+	pagination := validation.ParsePagination(r, 100)
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	role := r.URL.Query().Get("role")
+	active, err := parseOptionalBool(r, "isActive")
+	if err != nil {
+		h.errorHandler.Handle(w, r, err)
+		return
+	}
+	v := validation.NewValidator()
+	v.MaxLength("q", query, 200)
+	if role != "" {
+		v.OneOf("role", role, []string{"admin", "agent", "customer"})
+	}
+	if v.HasErrors() {
+		h.errorHandler.Handle(w, r, v.Errors())
+		return
+	}
+	users, err := h.adminService.ListUsersPage(r.Context(), ports.ListUsersParams{ActorID: claims.UserID, OrganizationID: claims.OrgID, Limit: pagination.Limit, Offset: pagination.Offset, Query: query, Role: role, IsActive: active})
 	if err != nil {
 		h.errorHandler.Handle(w, r, err)
 		return
@@ -88,7 +106,15 @@ func (h *AdminHandler) HandleListUsers(w http.ResponseWriter, r *http.Request) {
 		response = append(response, toUserSummaryDTO(user))
 	}
 
-	WriteList(w, response)
+	hasMore := len(response) > pagination.Limit
+	if hasMore {
+		response = response[:pagination.Limit]
+	}
+	WriteJSON(w, http.StatusOK, struct {
+		Data       []UserSummaryDTO   `json:"data"`
+		Count      int                `json:"count"`
+		Pagination PaginationMetadata `json:"pagination"`
+	}{Data: response, Count: len(response), Pagination: PaginationMetadata{Limit: pagination.Limit, Offset: pagination.Offset, HasMore: hasMore}})
 }
 
 // HandleUpdateUserRole handles PATCH /admin/users/{userID}/role

@@ -1,9 +1,11 @@
 package http
 
 import (
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -242,32 +244,21 @@ func (h *TicketHandler) HandleListTickets(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	createdFrom, err := validation.ParseTimeQueryParam(r, "createdFrom")
+	query, createdFromTime, createdToTime, err := parseTicketBaseline(r)
 	if err != nil {
-		v.Custom("createdFrom", false, "Must be a valid date or timestamp")
+		h.errorHandler.Handle(w, r, err)
+		return
 	}
-
-	createdTo, err := validation.ParseTimeQueryParam(r, "createdTo")
+	active, err := parseOptionalBool(r, "active")
 	if err != nil {
-		v.Custom("createdTo", false, "Must be a valid date or timestamp")
+		h.errorHandler.Handle(w, r, err)
+		return
 	}
-
-	var createdFromTime *time.Time
-	if createdFrom != nil {
-		createdFromTime = &createdFrom.Time
+	if status != nil {
+		v.OneOf("status", *status, []string{"OPEN", "IN_PROGRESS", "CLOSED"})
 	}
-
-	var createdToTime *time.Time
-	if createdTo != nil {
-		adjusted := createdTo.Time
-		if createdTo.DateOnly {
-			adjusted = adjusted.Add(24 * time.Hour)
-		}
-		createdToTime = &adjusted
-	}
-
-	if createdFromTime != nil && createdToTime != nil && createdFromTime.After(*createdToTime) {
-		v.Custom("createdFrom", false, "Must be before createdTo")
+	if priority != nil {
+		v.OneOf("priority", *priority, []string{"LOW", "MEDIUM", "HIGH"})
 	}
 
 	if unassigned {
@@ -280,6 +271,7 @@ func (h *TicketHandler) HandleListTickets(w http.ResponseWriter, r *http.Request
 	}
 
 	params := ports.ListTicketsParams{
+		Query: query, Active: active != nil && *active,
 		OrganizationID: claims.OrgID,
 		ViewerID:       claims.UserID,
 		Limit:          pagination.Limit,
@@ -518,10 +510,18 @@ func (h *TicketHandler) HandleAssignTicket(w http.ResponseWriter, r *http.Reques
 	WriteJSON(w, http.StatusOK, toTicketDTO(ticket, userInfoByID))
 }
 
-// TicketEventsResponse defines the JSON response for ticket events.
+// TicketEventDTO enriches factual snapshots with organization-scoped display identities.
+type TicketEventDTO struct {
+	*domain.Event
+	Actor    *UserInfoDTO `json:"actor,omitempty"`
+	Assignee *UserInfoDTO `json:"assignee,omitempty"`
+}
+
+// TicketEventsResponse carries one bounded event page in the requested direction.
 type TicketEventsResponse struct {
-	Data       []*domain.Event `json:"data"`
-	NextCursor *int64          `json:"nextCursor,omitempty"`
+	Data       []TicketEventDTO `json:"data"`
+	NextCursor *int64           `json:"nextCursor,omitempty"`
+	HasMore    bool             `json:"hasMore"`
 }
 
 // HandleListTicketEvents handles GET /tickets/{ticketID}/events
@@ -543,12 +543,35 @@ func (h *TicketHandler) HandleListTicketEvents(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	direction := r.URL.Query().Get("direction")
+	backward := direction == "backward"
+	v := validation.NewValidator()
+	if direction != "" {
+		v.OneOf("direction", direction, []string{"forward", "backward"})
+	}
+	var beforeID int64
+	if before := r.URL.Query().Get("before"); before != "" {
+		parsed, parseErr := strconv.ParseInt(before, 10, 64)
+		if parseErr != nil || parsed < 1 || !backward {
+			v.Custom("before", false, "before requires backward direction and a positive cursor")
+		} else {
+			beforeID = parsed
+		}
+	}
+	if backward && r.URL.Query().Has("after") {
+		v.Custom("after", false, "after cannot be used for backward history")
+	}
+	if v.HasErrors() {
+		h.errorHandler.Handle(w, r, v.Errors())
+		return
+	}
+
 	params := ports.ListTicketEventsParams{
 		OrganizationID: claims.OrgID,
 		TicketID:       ticketID,
 		ViewerID:       claims.UserID,
-		AfterID:        afterID,
-		Limit:          limit,
+		AfterID:        afterID, BeforeID: beforeID, Backward: backward,
+		Limit: limit + 1,
 	}
 
 	events, err := h.eventService.ListTicketEvents(r.Context(), params)
@@ -557,16 +580,48 @@ func (h *TicketHandler) HandleListTicketEvents(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	hasMore := len(events) > limit
+	if hasMore {
+		events = events[:limit]
+	}
+	ids := make([]uuid.UUID, 0, len(events)*2)
+	assigneeIDs := make(map[int64]uuid.UUID)
+	for _, event := range events {
+		ids = append(ids, event.ActorID)
+		if event.Type != domain.EventCommentAdded {
+			var snapshot struct {
+				AssigneeID *uuid.UUID `json:"assigneeId"`
+			}
+			if json.Unmarshal(event.Payload, &snapshot) == nil && snapshot.AssigneeID != nil {
+				ids = append(ids, *snapshot.AssigneeID)
+				assigneeIDs[event.ID] = *snapshot.AssigneeID
+			}
+		}
+	}
+	people, err := buildUserInfoDTOMap(r.Context(), h.userLookup, claims.OrgID, ids)
+	if err != nil {
+		h.errorHandler.Handle(w, r, err)
+		return
+	}
+	data := make([]TicketEventDTO, 0, len(events))
+	for _, event := range events {
+		entry := TicketEventDTO{Event: event}
+		if person, ok := people[event.ActorID]; ok {
+			entry.Actor = &person
+		}
+		if id, ok := assigneeIDs[event.ID]; ok {
+			if person, found := people[id]; found {
+				entry.Assignee = &person
+			}
+		}
+		data = append(data, entry)
+	}
 	var nextCursor *int64
 	if len(events) > 0 {
 		cursor := events[len(events)-1].ID
 		nextCursor = &cursor
 	}
-
-	WriteJSON(w, http.StatusOK, TicketEventsResponse{
-		Data:       events,
-		NextCursor: nextCursor,
-	})
+	WriteJSON(w, http.StatusOK, TicketEventsResponse{Data: data, NextCursor: nextCursor, HasMore: hasMore})
 }
 
 // --- Helper methods ---
@@ -647,10 +702,62 @@ func (h *TicketHandler) HandleTicketCounts(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	counts, err := h.ticketService.GetTicketCounts(r.Context(), claims.UserID, claims.OrgID)
+	query, from, to, err := parseTicketBaseline(r)
+	if err != nil {
+		h.errorHandler.Handle(w, r, err)
+		return
+	}
+	counts, err := h.ticketService.GetTicketCounts(r.Context(), ports.TicketCountsParams{ViewerID: claims.UserID, OrganizationID: claims.OrgID, Query: query, CreatedFrom: from, CreatedTo: to})
 	if err != nil {
 		h.errorHandler.Handle(w, r, err)
 		return
 	}
 	WriteJSON(w, http.StatusOK, counts)
+}
+
+// parseTicketBaseline is shared by ticket lists and every triage count.
+func parseTicketBaseline(r *http.Request) (string, *time.Time, *time.Time, error) {
+	v := validation.NewValidator()
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	v.MaxLength("q", query, 200)
+	from, err := validation.ParseTimeQueryParam(r, "createdFrom")
+	if err != nil {
+		v.Custom("createdFrom", false, "Must be a valid date or timestamp")
+	}
+	to, err := validation.ParseTimeQueryParam(r, "createdTo")
+	if err != nil {
+		v.Custom("createdTo", false, "Must be a valid date or timestamp")
+	}
+	var start, end *time.Time
+	if from != nil {
+		start = &from.Time
+	}
+	if to != nil {
+		value := to.Time
+		if to.DateOnly {
+			value = value.AddDate(0, 0, 1)
+		}
+		end = &value
+	}
+	if start != nil && end != nil && !start.Before(*end) {
+		v.Custom("createdFrom", false, "Must be before createdTo")
+	}
+	if v.HasErrors() {
+		return "", nil, nil, v.Errors()
+	}
+	return query, start, end, nil
+}
+
+func parseOptionalBool(r *http.Request, name string) (*bool, error) {
+	raw := r.URL.Query().Get(name)
+	if raw == "" {
+		return nil, nil
+	}
+	if raw != "true" && raw != "false" {
+		v := validation.NewValidator()
+		v.Custom(name, false, "Must be true or false")
+		return nil, v.Errors()
+	}
+	value := raw == "true"
+	return &value, nil
 }

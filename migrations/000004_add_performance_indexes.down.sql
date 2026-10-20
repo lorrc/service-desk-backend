@@ -3,8 +3,6 @@
 -- Tickets table indexes
 DROP INDEX IF EXISTS idx_tickets_requester_id;
 DROP INDEX IF EXISTS idx_tickets_assignee_id;
-DROP INDEX IF EXISTS idx_tickets_status;
-DROP INDEX IF EXISTS idx_tickets_priority;
 DROP INDEX IF EXISTS idx_tickets_status_created_at;
 DROP INDEX IF EXISTS idx_tickets_requester_created_at;
 DROP INDEX IF EXISTS idx_tickets_created_at_desc;

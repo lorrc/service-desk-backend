@@ -92,6 +92,16 @@ func (r *AuthorizationRepository) SetUserRole(ctx context.Context, userID uuid.U
 		if err := conn.QueryRow(txCtx, "SELECT id FROM users WHERE id = $1 FOR UPDATE", userID).Scan(&id); err != nil {
 			return err
 		}
+		var unchanged bool
+		if err := conn.QueryRow(txCtx, "SELECT count(*) = 1 AND bool_and(role_id = $2) FROM user_roles WHERE user_id = $1", userID, roleID).Scan(&unchanged); err != nil {
+			return err
+		}
+		if unchanged {
+			return nil
+		}
+		if _, err := conn.Exec(txCtx, "UPDATE users SET session_version = session_version + 1 WHERE id = $1", userID); err != nil {
+			return err
+		}
 		if _, err := conn.Exec(txCtx, "DELETE FROM user_roles WHERE user_id = $1", userID); err != nil {
 			return err
 		}

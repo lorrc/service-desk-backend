@@ -1,0 +1,16 @@
+name: Backend checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go build -mod=readonly ./...
+      - run: go test -mod=readonly -race ./migrations ./internal/auth ./internal/core/domain ./internal/core/services ./internal/adapters/primary/http/... ./internal/adapters/secondary/postgres -timeout=4m

@@ -17,7 +17,10 @@ type UserRepository interface {
 	GetUserInfo(ctx context.Context, orgID uuid.UUID, userIDs []uuid.UUID) (map[uuid.UUID]domain.UserInfo, error)
 	ValidateSession(ctx context.Context, userID, orgID uuid.UUID, version int64) (bool, error)
 	ListAssignableUsers(ctx context.Context, orgID uuid.UUID) ([]*domain.User, error)
-	ListByOrganization(ctx context.Context, orgID uuid.UUID) ([]*domain.UserSummary, error)
+	ListUsersPage(ctx context.Context, params ListUsersParams) ([]*domain.UserSummary, error)
+	GetRoles(ctx context.Context, userID, orgID uuid.UUID) ([]string, error)
+	ChangeOwnPassword(ctx context.Context, userID, orgID uuid.UUID, version int64, oldHash, newHash string) error
+	RevokeSessions(ctx context.Context, userID, orgID uuid.UUID, version int64) error
 	SetActive(ctx context.Context, userID uuid.UUID, isActive bool) error
 	UpdatePassword(ctx context.Context, userID uuid.UUID, hashedPassword string) error
 	UpdateLastActive(ctx context.Context, userID uuid.UUID, at time.Time) error
@@ -30,7 +33,7 @@ type TicketRepository interface {
 	GetForUpdate(ctx context.Context, id int64, orgID uuid.UUID) (*domain.Ticket, error)
 	Update(ctx context.Context, ticket *domain.Ticket, orgID uuid.UUID) (*domain.Ticket, error)
 	ListPaginated(ctx context.Context, params ListTicketsRepoParams) ([]*domain.Ticket, error)
-	GetCounts(ctx context.Context, orgID uuid.UUID, requesterID *uuid.UUID) (*domain.TicketCounts, error)
+	GetCounts(ctx context.Context, params TicketCountsRepoParams) (*domain.TicketCounts, error)
 }
 
 // AuthorizationRepository defines the port for RBAC data access.
@@ -56,10 +59,13 @@ type CommentRepository interface {
 type TicketEventRepository interface {
 	Create(ctx context.Context, event *domain.Event) (*domain.Event, error)
 	ListByTicketID(ctx context.Context, ticketID int64, afterID int64, limit int) ([]*domain.Event, error)
+	ListHistory(ctx context.Context, ticketID, beforeID int64, limit int) ([]*domain.Event, error)
 }
 
 // ListTicketsRepoParams defines parameters for paginated ticket queries.
 type ListTicketsRepoParams struct {
+	Query          string
+	Active         bool
 	OrganizationID uuid.UUID
 	Limit          int
 	Offset         int
@@ -70,4 +76,25 @@ type ListTicketsRepoParams struct {
 	Unassigned     bool
 	CreatedFrom    *time.Time
 	CreatedTo      *time.Time
+}
+
+// TicketCountsRepoParams contains the baseline filters shared by triage tabs.
+type TicketCountsRepoParams struct {
+	OrganizationID uuid.UUID
+	ViewerID       uuid.UUID
+	RequesterID    *uuid.UUID
+	Query          string
+	CreatedFrom    *time.Time
+	CreatedTo      *time.Time
+}
+
+// ListUsersParams scopes and filters an administrator's user directory.
+type ListUsersParams struct {
+	OrganizationID uuid.UUID
+	ActorID        uuid.UUID
+	Query          string
+	Role           string
+	IsActive       *bool
+	Limit          int
+	Offset         int
 }

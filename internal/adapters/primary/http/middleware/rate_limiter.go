@@ -15,6 +15,7 @@ type RateLimiter struct {
 	rate      rate.Limit
 	burst     int
 	stop      chan struct{}
+	done      chan struct{}
 	closeOnce sync.Once
 }
 
@@ -58,6 +59,7 @@ func NewRateLimiter(cfg RateLimiterConfig) *RateLimiter {
 		rate:     rate.Limit(cfg.RequestsPerSecond),
 		burst:    cfg.BurstSize,
 		stop:     make(chan struct{}),
+		done:     make(chan struct{}),
 	}
 
 	// Start background cleanup goroutine
@@ -84,6 +86,7 @@ func (rl *RateLimiter) getVisitor(ip string) *rate.Limiter {
 
 // cleanupVisitors removes old visitors that haven't been seen recently
 func (rl *RateLimiter) cleanupVisitors(interval, ttl time.Duration) {
+	defer close(rl.done)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -91,20 +94,28 @@ func (rl *RateLimiter) cleanupVisitors(interval, ttl time.Duration) {
 		select {
 		case <-rl.stop:
 			return
-		case <-ticker.C:
+		case now := <-ticker.C:
+			rl.removeExpiredVisitors(now, ttl)
 		}
-		rl.mu.Lock()
-		for ip, v := range rl.visitors {
-			if time.Since(v.lastSeen) > ttl {
-				delete(rl.visitors, ip)
-			}
-		}
-		rl.mu.Unlock()
 	}
 }
 
-// Close stops the background cleanup worker.
-func (rl *RateLimiter) Close() { rl.closeOnce.Do(func() { close(rl.stop) }) }
+func (rl *RateLimiter) removeExpiredVisitors(now time.Time, ttl time.Duration) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	for ip, v := range rl.visitors {
+		if now.Sub(v.lastSeen) > ttl {
+			delete(rl.visitors, ip)
+		}
+	}
+}
+
+// Close stops the background cleanup worker and waits for it to exit.
+// Concurrent or repeated calls are safe.
+func (rl *RateLimiter) Close() {
+	rl.closeOnce.Do(func() { close(rl.stop) })
+	<-rl.done
+}
 
 // Allow checks if a request from the given IP is allowed
 func (rl *RateLimiter) Allow(ip string) bool {
@@ -126,54 +137,4 @@ func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
-}
-
-// RateLimitByKey provides rate limiting by arbitrary keys (e.g., user ID, API key)
-type RateLimitByKey struct {
-	limiters map[string]*visitor
-	mu       sync.RWMutex
-	rate     rate.Limit
-	burst    int
-}
-
-// NewRateLimitByKey creates a key-based rate limiter
-func NewRateLimitByKey(requestsPerSecond float64, burst int) *RateLimitByKey {
-	rl := &RateLimitByKey{
-		limiters: make(map[string]*visitor),
-		rate:     rate.Limit(requestsPerSecond),
-		burst:    burst,
-	}
-
-	// Cleanup goroutine
-	go func() {
-		ticker := time.NewTicker(time.Minute)
-		defer ticker.Stop()
-		for range ticker.C {
-			rl.mu.Lock()
-			for key, v := range rl.limiters {
-				if time.Since(v.lastSeen) > 5*time.Minute {
-					delete(rl.limiters, key)
-				}
-			}
-			rl.mu.Unlock()
-		}
-	}()
-
-	return rl
-}
-
-// Allow checks if a request with the given key is allowed
-func (rl *RateLimitByKey) Allow(key string) bool {
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
-
-	v, exists := rl.limiters[key]
-	if !exists {
-		limiter := rate.NewLimiter(rl.rate, rl.burst)
-		rl.limiters[key] = &visitor{limiter: limiter, lastSeen: time.Now()}
-		return limiter.Allow()
-	}
-
-	v.lastSeen = time.Now()
-	return v.limiter.Allow()
 }

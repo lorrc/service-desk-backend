@@ -34,12 +34,18 @@ func NewAdminService(
 	}
 }
 
-func (s *AdminService) ListUsers(ctx context.Context, actorID, orgID uuid.UUID) ([]*domain.UserSummary, error) {
-	if err := s.requireAdmin(ctx, actorID); err != nil {
+// ListUsersPage returns one bounded directory page within the administrator's organization.
+func (s *AdminService) ListUsersPage(ctx context.Context, params ports.ListUsersParams) ([]*domain.UserSummary, error) {
+	if err := s.requireAdmin(ctx, params.ActorID); err != nil {
 		return nil, err
 	}
-
-	return s.userRepo.ListByOrganization(ctx, orgID)
+	if params.Limit < 1 || params.Limit > 100 || params.Offset < 0 || params.Offset > 2147483647 {
+		errors := apperrors.NewValidationErrors()
+		errors.Add("pagination", "Limit must be between 1 and 100 and offset must fit a nonnegative 32-bit integer")
+		return nil, errors
+	}
+	params.Limit++
+	return s.userRepo.ListUsersPage(ctx, params)
 }
 
 func (s *AdminService) UpdateUserRole(ctx context.Context, actorID, orgID, userID uuid.UUID, role string) error {

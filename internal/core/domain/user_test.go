@@ -36,11 +36,12 @@ func TestValidatePassword(t *testing.T) {
 		{"no number", "Password", false},
 
 		// Too long
-		{"too long", strings.Repeat("P", 129), false},
+		{"73 bytes rejected", "Aa1" + strings.Repeat("x", 70), false},
 
 		// Edge cases
 		{"exactly 8 chars valid", "Passwor1", true},
-		{"exactly 128 chars valid", strings.Repeat("P", 60) + strings.Repeat("a", 60) + "1234567A", true},
+		{"exactly 72 bytes valid", "Aa1" + strings.Repeat("x", 69), true},
+		{"unicode bytes count toward bcrypt limit", "Aa1" + strings.Repeat("é", 35), false},
 	}
 
 	for _, tt := range tests {

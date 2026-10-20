@@ -83,3 +83,44 @@ func (q *Queries) ListTicketEvents(ctx context.Context, arg ListTicketEventsPara
 	}
 	return items, nil
 }
+
+const listTicketHistory = `-- name: ListTicketHistory :many
+SELECT id, ticket_id, type, payload, actor_id, created_at FROM ticket_events
+WHERE ticket_id = $1
+  AND (id < $2 OR $2 = 0)
+ORDER BY id DESC
+LIMIT $3
+`
+
+type ListTicketHistoryParams struct {
+	TicketID int64 `json:"ticket_id"`
+	ID       int64 `json:"id"`
+	Limit    int32 `json:"limit"`
+}
+
+func (q *Queries) ListTicketHistory(ctx context.Context, arg ListTicketHistoryParams) ([]TicketEvent, error) {
+	rows, err := q.db.Query(ctx, listTicketHistory, arg.TicketID, arg.ID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TicketEvent
+	for rows.Next() {
+		var i TicketEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.TicketID,
+			&i.Type,
+			&i.Payload,
+			&i.ActorID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

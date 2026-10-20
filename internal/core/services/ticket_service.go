@@ -195,7 +195,7 @@ func (s *TicketService) ListTickets(ctx context.Context, params ports.ListTicket
 		return nil, errs
 	}
 	return s.ticketRepo.ListPaginated(ctx, ports.ListTicketsRepoParams{
-		OrganizationID: params.OrganizationID, RequesterID: requesterID,
+		OrganizationID: params.OrganizationID, RequesterID: requesterID, Query: params.Query, Active: params.Active,
 		Limit: params.Limit + 1, Offset: params.Offset,
 		Status: params.Status, Priority: params.Priority, AssigneeID: params.AssigneeID,
 		Unassigned: params.Unassigned, CreatedFrom: params.CreatedFrom, CreatedTo: params.CreatedTo,
@@ -203,12 +203,12 @@ func (s *TicketService) ListTickets(ctx context.Context, params ports.ListTicket
 }
 
 // GetTicketCounts counts all visible tickets rather than a single page.
-func (s *TicketService) GetTicketCounts(ctx context.Context, viewerID, orgID uuid.UUID) (*domain.TicketCounts, error) {
-	requesterID, err := s.requesterScope(ctx, viewerID, orgID)
+func (s *TicketService) GetTicketCounts(ctx context.Context, params ports.TicketCountsParams) (*domain.TicketCounts, error) {
+	requesterID, err := s.requesterScope(ctx, params.ViewerID, params.OrganizationID)
 	if err != nil {
 		return nil, err
 	}
-	return s.ticketRepo.GetCounts(ctx, orgID, requesterID)
+	return s.ticketRepo.GetCounts(ctx, ports.TicketCountsRepoParams{OrganizationID: params.OrganizationID, ViewerID: params.ViewerID, RequesterID: requesterID, Query: params.Query, CreatedFrom: params.CreatedFrom, CreatedTo: params.CreatedTo})
 }
 
 func (s *TicketService) notifyStatusUpdate(ticket *domain.Ticket) {
