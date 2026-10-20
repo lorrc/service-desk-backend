@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -44,7 +45,7 @@ func (s *AuthService) Register(ctx context.Context, fullName, email, password, r
 	var created *domain.User
 	err = s.txManager.WithTransaction(ctx, func(txCtx context.Context) error {
 		var err error
-		created, err = s.createAccount(txCtx, user, role)
+		created, err = createAccount(txCtx, s.userRepo, s.authRepo, user, role)
 		return err
 	})
 	if err != nil {
@@ -53,12 +54,12 @@ func (s *AuthService) Register(ctx context.Context, fullName, email, password, r
 	return created, nil
 }
 
-func (s *AuthService) createAccount(ctx context.Context, user *domain.User, role string) (*domain.User, error) {
-	created, err := s.userRepo.Create(ctx, user)
+func createAccount(ctx context.Context, users ports.UserRepository, roles ports.AuthorizationRepository, user *domain.User, role string) (*domain.User, error) {
+	created, err := users.Create(ctx, user)
 	if err != nil {
 		return nil, fmt.Errorf("create user: %w", err)
 	}
-	if err := s.authRepo.AssignRole(ctx, created.ID, role); err != nil {
+	if err := roles.AssignRole(ctx, created.ID, role); err != nil {
 		return nil, fmt.Errorf("assign user role: %w", err)
 	}
 	return created, nil
@@ -77,7 +78,7 @@ func (s *AuthService) BootstrapAdmin(ctx context.Context, fullName, email, passw
 			if err != nil {
 				return err
 			}
-			_, err = s.createAccount(txCtx, user, "admin")
+			_, err = createAccount(txCtx, s.userRepo, s.authRepo, user, "admin")
 			return err
 		}
 		if err != nil {
@@ -104,6 +105,10 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (*domai
 		return nil, apperrors.ErrPasswordRequired
 	}
 	user, err := s.userRepo.GetByEmail(ctx, email)
+	canonical := strings.ToLower(strings.TrimSpace(email))
+	if errors.Is(err, apperrors.ErrUserNotFound) && canonical != email {
+		user, err = s.userRepo.GetByEmail(ctx, canonical)
+	}
 	if err != nil {
 		if errors.Is(err, apperrors.ErrUserNotFound) {
 			return nil, apperrors.ErrInvalidCredentials

@@ -137,7 +137,7 @@ func newMeRouter() (*chi.Mux, *auth.TokenManager) {
 	authzService := services.NewAuthorizationService(authRepo)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	errorHandler := NewErrorHandler(logger)
-	meHandler := NewMeHandler(authzService, services.NewAccountService(pgadapter.NewUserRepository(testPool), authzService), errorHandler, logger)
+	meHandler := NewMeHandler(authzService, services.NewAccountService(pgadapter.NewUserRepository(testPool), authzService, pgadapter.NewOrganizationRepository(testPool)), errorHandler, logger)
 	tokenManager := auth.NewTokenManager("test-secret", time.Hour)
 
 	router := chi.NewRouter()

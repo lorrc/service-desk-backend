@@ -14,7 +14,9 @@ Ticket lists and dashboard counts share the same requester scope: customers see 
 
 Application services start transactions through `TransactionManager`. Repositories use the transaction attached to the context, falling back to the pool only outside a transaction.
 
-- Registration inserts the user and role together. Failure rolls back both.
+- Public onboarding creates a fresh organization, user, and admin role together, or consumes an email-bound invitation and inserts a customer in that invitation's organization. Failure rolls back every change, including invitation consumption. Concurrent acceptance has one winner.
+- Organization names never select an existing organization or confer access. Invitation administration checks the authenticated actor's permissions and organization, and repository operations constrain every list and revocation by organization. Only token hashes are stored, and previews accept the raw token in a request body.
+- Internal registration inserts the user and role together for operator bootstrap and test fixtures. It is not exposed as the public onboarding path.
 - Administrator bootstrap locks the organization row before checking or creating the account, serializing competing replicas.
 - Ticket changes acquire `SELECT ... FOR UPDATE` before reading the state used for validation. The ticket update and event insertion commit together. A concurrent writer validates against the most recently committed state.
 - Replacing a user's role locks that user and commits the removal, replacement, and session-version increment together. An unchanged role set is a no-op.

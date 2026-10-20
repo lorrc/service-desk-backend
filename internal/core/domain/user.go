@@ -40,15 +40,16 @@ func DefaultPasswordRequirements() PasswordRequirements {
 }
 
 type User struct {
-	ID             uuid.UUID
-	OrganizationID uuid.UUID
-	FullName       string
-	Email          string
-	HashedPassword string
-	CreatedAt      time.Time
-	IsActive       bool
-	LastActiveAt   *time.Time
-	SessionVersion int64
+	ID               uuid.UUID
+	OrganizationID   uuid.UUID
+	OrganizationName string
+	FullName         string
+	Email            string
+	HashedPassword   string
+	CreatedAt        time.Time
+	IsActive         bool
+	LastActiveAt     *time.Time
+	SessionVersion   int64
 }
 
 type UserSummary struct {

@@ -38,6 +38,7 @@ func TestMigrationSafety(t *testing.T) {
 	})
 	connectionString, err := container.ConnectionString(t.Context(), "sslmode=disable")
 	require.NoError(t, err)
+	testInvitationMigration(t, connectionString)
 
 	t.Run("version 2 removes only its indexes", func(t *testing.T) {
 		db := newMigrationDatabase(t, connectionString)
@@ -186,6 +187,8 @@ func TestMigrationSafety(t *testing.T) {
 				userID, ticketID := db.fixture()
 				db.exec("INSERT INTO comments (ticket_id, author_id, body) VALUES ($1, $2, 'before rebuild')", ticketID, userID)
 				db.exec("INSERT INTO ticket_events (ticket_id, type, payload, actor_id) VALUES ($1, 'created', '{}', $2)", ticketID, userID)
+				db.exec(`INSERT INTO organization_invitations (organization_id, email, token_hash, created_by, expires_at)
+					VALUES ('00000000-0000-0000-0000-000000000001', 'invited@example.test', decode(repeat('ab', 32), 'hex'), $1, NOW() + interval '1 day')`, userID)
 			}
 			require.NoError(t, db.migration.Down())
 			require.Equal(t, int64(0), db.count(`SELECT count(*) FROM information_schema.tables

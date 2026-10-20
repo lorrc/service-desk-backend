@@ -16,16 +16,18 @@ import (
 )
 
 type AdminHandler struct {
-	adminService ports.AdminService
-	errorHandler *ErrorHandler
-	logger       *slog.Logger
+	adminService      ports.AdminService
+	onboardingService ports.OnboardingService
+	errorHandler      *ErrorHandler
+	logger            *slog.Logger
 }
 
-func NewAdminHandler(adminService ports.AdminService, errorHandler *ErrorHandler, logger *slog.Logger) *AdminHandler {
+func NewAdminHandler(adminService ports.AdminService, onboardingService ports.OnboardingService, errorHandler *ErrorHandler, logger *slog.Logger) *AdminHandler {
 	return &AdminHandler{
-		adminService: adminService,
-		errorHandler: errorHandler,
-		logger:       logger.With("handler", "admin"),
+		adminService:      adminService,
+		onboardingService: onboardingService,
+		errorHandler:      errorHandler,
+		logger:            logger.With("handler", "admin"),
 	}
 }
 
@@ -38,6 +40,9 @@ func (h *AdminHandler) RegisterRoutes(r chi.Router) {
 	})
 
 	r.Get("/analytics/overview", h.HandleAnalyticsOverview)
+	r.Get("/invitations", h.HandleListInvitations)
+	r.Post("/invitations", h.HandleCreateInvitation)
+	r.Delete("/invitations/{invitationID}", h.HandleRevokeInvitation)
 }
 
 type UpdateUserRoleRequest struct {

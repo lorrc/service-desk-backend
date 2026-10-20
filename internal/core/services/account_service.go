@@ -12,13 +12,14 @@ import (
 
 // AccountService manages self-service account access and session revocation.
 type AccountService struct {
-	users       ports.UserRepository
-	permissions ports.AuthorizationService
+	users         ports.UserRepository
+	permissions   ports.AuthorizationService
+	organizations ports.OrganizationRepository
 }
 
 // NewAccountService constructs account operations from persistence and authorization ports.
-func NewAccountService(users ports.UserRepository, permissions ports.AuthorizationService) ports.AccountService {
-	return &AccountService{users: users, permissions: permissions}
+func NewAccountService(users ports.UserRepository, permissions ports.AuthorizationService, organizations ports.OrganizationRepository) ports.AccountService {
+	return &AccountService{users: users, permissions: permissions, organizations: organizations}
 }
 
 func (s *AccountService) currentUser(ctx context.Context, userID, orgID uuid.UUID, version int64) (*domain.User, error) {
@@ -38,6 +39,11 @@ func (s *AccountService) Profile(ctx context.Context, userID, orgID uuid.UUID, v
 	if err != nil {
 		return nil, err
 	}
+	organization, err := s.organizations.GetByID(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	user.OrganizationName = organization.Name
 	permissions, err := s.permissions.GetPermissions(ctx, userID)
 	if err != nil {
 		return nil, err

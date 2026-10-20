@@ -136,6 +136,8 @@ func run() error {
 
 	authService := services.NewAuthService(userRepo, authzRepo, txManager, defaultOrgID)
 	authzService := services.NewAuthorizationService(authzRepo)
+	organizationRepo := postgres.NewOrganizationRepository(pool)
+	onboardingService := services.NewOnboardingService(userRepo, authzRepo, authzService, organizationRepo, postgres.NewInvitationRepository(pool), txManager)
 	assigneeService := services.NewAssigneeService(userRepo, authzService)
 	userLookupService := services.NewUserLookupService(userRepo)
 	ticketService := services.NewTicketService(ticketRepo, authzService, notifier, eventRepo, txManager, userRepo)
@@ -148,10 +150,10 @@ func run() error {
 		return fmt.Errorf("failed to seed admin user: %w", err)
 	}
 
-	authHandler := httpAdapter.NewAuthHandler(authService, tokenManager, errorHandler, logger)
-	meHandler := httpAdapter.NewMeHandler(authzService, services.NewAccountService(userRepo, authzService), errorHandler, logger)
+	authHandler := httpAdapter.NewAuthHandler(authService, onboardingService, tokenManager, errorHandler, logger)
+	meHandler := httpAdapter.NewMeHandler(authzService, services.NewAccountService(userRepo, authzService, organizationRepo), errorHandler, logger)
 	assigneeHandler := httpAdapter.NewAssigneeHandler(assigneeService, errorHandler, logger)
-	adminHandler := httpAdapter.NewAdminHandler(adminService, errorHandler, logger)
+	adminHandler := httpAdapter.NewAdminHandler(adminService, onboardingService, errorHandler, logger)
 	commentHandler := httpAdapter.NewCommentHandler(commentService, userLookupService, errorHandler, logger)
 	ticketHandler := httpAdapter.NewTicketHandler(ticketService, eventService, userLookupService, commentHandler, errorHandler, logger)
 	healthHandler := httpAdapter.NewHealthHandler(pool, cfg.App.Version)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/go-chi/chi/v5"
 	"io"
 	"log/slog"
 	"net/url"
@@ -12,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	pgadapter "github.com/lorrc/service-desk-backend/internal/adapters/secondary/postgres"
 	"github.com/lorrc/service-desk-backend/internal/auth"
@@ -318,17 +318,18 @@ func TestApplicationAuthHTTPContract(t *testing.T) {
 	ctx := context.Background()
 	org := createTestOrganization(t, ctx)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	handler := NewAuthHandler(reviewAuth(org), auth.NewTokenManager("test-secret", time.Hour), NewErrorHandler(logger), logger)
+	handler := NewAuthHandler(reviewAuth(org), reviewOnboarding(), auth.NewTokenManager("test-secret", time.Hour), NewErrorHandler(logger), logger)
 	router := chi.NewRouter()
 	router.Route("/auth", handler.RegisterRoutes)
 	address := uuid.NewString() + "@example.com"
-	body := fmt.Sprintf(`{"fullName":"Public Signup","email":%q,"password":"Password1","role":"admin","organizationId":%q}`, address, uuid.NewString())
+	body := fmt.Sprintf(`{"fullName":"Public Signup","email":%q,"password":"Password1","organizationName":"New Workspace","role":"customer","organizationId":%q}`, address, org.String())
 	response := reviewRequest(router, "POST", "/auth/register", "", body)
 	require.Equal(t, 201, response.Code, response.Body.String())
 	var registered AuthResponse
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &registered))
 	require.NotNil(t, registered.User)
-	assert.Equal(t, org.String(), registered.User.OrganizationID)
+	assert.NotEqual(t, org.String(), registered.User.OrganizationID)
+	assert.Equal(t, "New Workspace", registered.User.OrganizationName)
 	assert.Equal(t, "Public Signup", registered.User.FullName)
 	assert.NotEmpty(t, registered.Token)
 	assert.NotContains(t, response.Body.String(), "hashedPassword")
@@ -337,7 +338,7 @@ func TestApplicationAuthHTTPContract(t *testing.T) {
 	require.Equal(t, 200, profile.Code, profile.Body.String())
 	var current ProfileResponse
 	require.NoError(t, json.Unmarshal(profile.Body.Bytes(), &current))
-	assert.Equal(t, []string{"customer"}, current.Roles)
+	assert.Equal(t, []string{"admin"}, current.Roles)
 	require.Equal(t, 409, reviewRequest(router, "POST", "/auth/register", "", body).Code)
 	for _, tc := range []struct {
 		path, body string

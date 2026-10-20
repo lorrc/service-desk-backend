@@ -12,6 +12,7 @@ import (
 type UserRepository interface {
 	Create(ctx context.Context, user *domain.User) (*domain.User, error)
 	GetByEmail(ctx context.Context, email string) (*domain.User, error)
+	EmailExists(ctx context.Context, email string) (bool, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error)
 	LockOrganization(ctx context.Context, orgID uuid.UUID) error
 	GetUserInfo(ctx context.Context, orgID uuid.UUID, userIDs []uuid.UUID) (map[uuid.UUID]domain.UserInfo, error)

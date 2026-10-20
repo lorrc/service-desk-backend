@@ -43,18 +43,24 @@ func newReviewRouter(t *testing.T) stdhttp.Handler {
 	errors := NewErrorHandler(logger)
 	commentHandler := NewCommentHandler(comments, lookup, errors, logger)
 	ticketHandler := NewTicketHandler(tickets, services.NewEventService(events, tickets), lookup, commentHandler, errors, logger)
-	adminHandler := NewAdminHandler(services.NewAdminService(users, rbac, permissions, pgadapter.NewAnalyticsRepository(testPool)), errors, logger)
+	adminHandler := NewAdminHandler(services.NewAdminService(users, rbac, permissions, pgadapter.NewAnalyticsRepository(testPool)), reviewOnboarding(), errors, logger)
 	router := chi.NewRouter()
 	router.Use(mw.JWTMiddleware(auth.NewTokenManager("test-secret", time.Hour), users))
 	router.Route("/tickets", ticketHandler.RegisterRoutes)
 	router.Route("/admin", adminHandler.RegisterRoutes)
-	meHandler := NewMeHandler(permissions, services.NewAccountService(users, permissions), errors, logger)
+	meHandler := NewMeHandler(permissions, services.NewAccountService(users, permissions, pgadapter.NewOrganizationRepository(testPool)), errors, logger)
 	router.Route("/me", meHandler.RegisterRoutes)
 	return router
 }
 
 func reviewAuth(orgID uuid.UUID) ports.AuthService {
 	return services.NewAuthService(pgadapter.NewUserRepository(testPool), pgadapter.NewAuthorizationRepository(testPool), pgadapter.NewTransactionManager(testPool), orgID)
+}
+
+func reviewOnboarding() ports.OnboardingService {
+	users := pgadapter.NewUserRepository(testPool)
+	roles := pgadapter.NewAuthorizationRepository(testPool)
+	return services.NewOnboardingService(users, roles, services.NewAuthorizationService(roles), pgadapter.NewOrganizationRepository(testPool), pgadapter.NewInvitationRepository(testPool), pgadapter.NewTransactionManager(testPool))
 }
 
 func reviewRequest(router stdhttp.Handler, method, path, token, body string) *httptest.ResponseRecorder {

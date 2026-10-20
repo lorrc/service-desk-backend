@@ -272,7 +272,7 @@ func newAdminRouter() (*chi.Mux, *auth.TokenManager) {
 	adminService := services.NewAdminService(userRepo, authRepo, authzService, analyticsRepo)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	errorHandler := NewErrorHandler(logger)
-	adminHandler := NewAdminHandler(adminService, errorHandler, logger)
+	adminHandler := NewAdminHandler(adminService, reviewOnboarding(), errorHandler, logger)
 	tokenManager := auth.NewTokenManager("test-secret", time.Hour)
 
 	router := chi.NewRouter()

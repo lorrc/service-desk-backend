@@ -35,6 +35,11 @@ func (m *MockUserRepository) GetByEmail(ctx context.Context, email string) (*dom
 	return args.Get(0).(*domain.User), args.Error(1)
 }
 
+func (m *MockUserRepository) EmailExists(ctx context.Context, email string) (bool, error) {
+	args := m.Called(ctx, email)
+	return args.Bool(0), args.Error(1)
+}
+
 func (m *MockUserRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error) {
 	args := m.Called(ctx, id)
 	if args.Get(0) == nil {

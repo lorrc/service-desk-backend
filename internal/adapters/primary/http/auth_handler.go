@@ -3,9 +3,10 @@ package http
 import (
 	"log/slog"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
 	"github.com/lorrc/service-desk-backend/internal/adapters/primary/validation"
 	"github.com/lorrc/service-desk-backend/internal/auth"
 	"github.com/lorrc/service-desk-backend/internal/core/domain"
@@ -20,6 +21,7 @@ type LoginRequest struct {
 
 // Validate validates the login request
 func (r *LoginRequest) Validate() error {
+	r.Email = strings.TrimSpace(r.Email)
 	v := validation.NewValidator()
 
 	v.Required("email", r.Email).
@@ -35,13 +37,16 @@ func (r *LoginRequest) Validate() error {
 
 // RegisterRequest defines the expected JSON body for a registration request.
 type RegisterRequest struct {
-	FullName string `json:"fullName"`
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	FullName         string `json:"fullName"`
+	Email            string `json:"email"`
+	Password         string `json:"password"`
+	OrganizationName string `json:"organizationName"`
+	InvitationToken  string `json:"invitationToken"`
 }
 
 // Validate validates the register request (basic validation, detailed validation in domain)
 func (r *RegisterRequest) Validate() error {
+	r.Email = strings.TrimSpace(r.Email)
 	v := validation.NewValidator()
 
 	v.Required("fullName", r.FullName)
@@ -63,33 +68,37 @@ type AuthResponse struct {
 
 // UserDTO is a safe representation of the user (no password hash)
 type UserDTO struct {
-	ID             string `json:"id"`
-	OrganizationID string `json:"organizationId"`
-	FullName       string `json:"fullName"`
-	Email          string `json:"email"`
-	CreatedAt      string `json:"createdAt"`
+	ID               string `json:"id"`
+	OrganizationID   string `json:"organizationId"`
+	OrganizationName string `json:"organizationName"`
+	FullName         string `json:"fullName"`
+	Email            string `json:"email"`
+	CreatedAt        string `json:"createdAt"`
 }
 
 // AuthHandler handles authentication HTTP requests
 type AuthHandler struct {
-	authService  ports.AuthService
-	tokenManager *auth.TokenManager
-	errorHandler *ErrorHandler
-	logger       *slog.Logger
+	authService       ports.AuthService
+	onboardingService ports.OnboardingService
+	tokenManager      *auth.TokenManager
+	errorHandler      *ErrorHandler
+	logger            *slog.Logger
 }
 
 // NewAuthHandler creates a new AuthHandler with the necessary dependencies.
 func NewAuthHandler(
 	authService ports.AuthService,
+	onboardingService ports.OnboardingService,
 	tokenManager *auth.TokenManager,
 	errorHandler *ErrorHandler,
 	logger *slog.Logger,
 ) *AuthHandler {
 	return &AuthHandler{
-		authService:  authService,
-		tokenManager: tokenManager,
-		errorHandler: errorHandler,
-		logger:       logger.With("handler", "auth"),
+		authService:       authService,
+		onboardingService: onboardingService,
+		tokenManager:      tokenManager,
+		errorHandler:      errorHandler,
+		logger:            logger.With("handler", "auth"),
 	}
 }
 
@@ -97,6 +106,7 @@ func NewAuthHandler(
 func (h *AuthHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/login", h.HandleLogin)
 	r.Post("/register", h.HandleRegister)
+	r.Post("/invitations/preview", h.HandlePreviewInvitation)
 }
 
 // HandleLogin processes login requests
@@ -113,6 +123,11 @@ func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user, err := h.authService.Login(r.Context(), req.Email, req.Password)
+	if err != nil {
+		h.errorHandler.Handle(w, r, err)
+		return
+	}
+	user.OrganizationName, err = h.onboardingService.OrganizationName(r.Context(), user.OrganizationID)
 	if err != nil {
 		h.errorHandler.Handle(w, r, err)
 		return
@@ -153,7 +168,10 @@ func (h *AuthHandler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Register user (domain validation happens in the service)
-	user, err := h.authService.Register(r.Context(), req.FullName, req.Email, req.Password, "customer", uuid.Nil)
+	user, err := h.onboardingService.Register(r.Context(), ports.OnboardingParams{
+		FullName: req.FullName, Email: req.Email, Password: req.Password,
+		OrganizationName: req.OrganizationName, InvitationToken: req.InvitationToken,
+	})
 	if err != nil {
 		h.errorHandler.Handle(w, r, err)
 		return
@@ -183,10 +201,36 @@ func (h *AuthHandler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 // toUserDTO converts a domain user to a safe DTO
 func toUserDTO(user *domain.User) *UserDTO {
 	return &UserDTO{
-		ID:             user.ID.String(),
-		OrganizationID: user.OrganizationID.String(),
-		FullName:       user.FullName,
-		Email:          user.Email,
-		CreatedAt:      user.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		ID:               user.ID.String(),
+		OrganizationID:   user.OrganizationID.String(),
+		OrganizationName: user.OrganizationName,
+		FullName:         user.FullName,
+		Email:            user.Email,
+		CreatedAt:        user.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
+}
+
+// PreviewInvitationRequest supplies an invitation token without placing it in a URL.
+type PreviewInvitationRequest struct {
+	Token string `json:"token"`
+}
+
+// HandlePreviewInvitation returns the intended recipient and organization for a valid invitation.
+func (h *AuthHandler) HandlePreviewInvitation(w http.ResponseWriter, r *http.Request) {
+	request, err := validation.DecodeAndValidate[PreviewInvitationRequest](r)
+	if err != nil {
+		h.errorHandler.Handle(w, r, err)
+		return
+	}
+	invitation, err := h.onboardingService.PreviewInvitation(r.Context(), request.Token)
+	if err != nil {
+		h.errorHandler.Handle(w, r, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	WriteJSON(w, http.StatusOK, struct {
+		OrganizationName string `json:"organizationName"`
+		Email            string `json:"email"`
+		ExpiresAt        string `json:"expiresAt"`
+	}{invitation.OrganizationName, invitation.Email, invitation.ExpiresAt.Format(time.RFC3339)})
 }

@@ -88,6 +88,13 @@ func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*domain.
 	return mapDBUserToDomain(dbUser), nil
 }
 
+// EmailExists checks the canonical email against existing accounts in every organization.
+func (r *UserRepository) EmailExists(ctx context.Context, email string) (bool, error) {
+	var exists bool
+	err := GetDBTX(ctx, r.pool).QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM users WHERE lower(btrim(email)) = $1)", email).Scan(&exists)
+	return exists, err
+}
+
 // GetByID retrieves a user by their ID.
 func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error) {
 	dbUser, err := db.New(GetDBTX(ctx, r.pool)).GetUserByID(ctx, pgtype.UUID{Bytes: id, Valid: true})

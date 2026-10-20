@@ -12,10 +12,20 @@ Go HTTP API for organization-scoped support tickets, comments, event feeds, and 
    ```
 
    The CLI reads the exported environment variable. The API loads `.env` itself, but does not run migrations on startup.
-3. Configure `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_FIRST_NAME`, and `ADMIN_LAST_NAME` to provision an administrator. Public registration always creates customers. Bootstrap is atomic and safe across replicas; an existing account keeps its current password and active status.
+3. Open the frontend registration page to create an organization and its first administrator. For operator-managed setup of the default organization, optionally configure `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_FIRST_NAME`, and `ADMIN_LAST_NAME`. Bootstrap is atomic and safe across replicas; an existing account keeps its current password and active status.
 4. Run `go run ./cmd/api`. The API listens on `:8080` by default, under `/api/v1`. Readiness is available at `/health/ready`.
 
+The browser application runs separately at [http://localhost:3000/](http://localhost:3000/). Start it with `npm run dev` from the sibling `service-desk-frontend` directory. This repository's Docker Compose starts the API and PostgreSQL only. Visiting `http://localhost:8080/` returns 404 because the API has no homepage; use [the readiness endpoint](http://localhost:8080/health/ready) to check it.
+
 The migrations create a default organization with ID `00000000-0000-0000-0000-000000000001`. A custom `DEFAULT_ORG_ID` must refer to an existing organization.
+
+## Organization onboarding
+
+Public registration has two explicit paths. Creating an organization inserts a fresh organization, its creator, and the admin role in one transaction. Joining requires an invitation issued by an administrator of that organization; the new user always starts as a customer. Admins can promote customers through User Management. Organization names are display labels, not unique identifiers or a way to join an existing organization.
+
+Invitations are bound to an email address, expire after seven days, and can be accepted once or revoked by an administrator. Only a SHA-256 hash is stored; the random invitation token is returned once when created. The frontend builds a `/register#invite=...` link for manual sharing. This release does not send invitation emails. Existing accounts cannot use invitations to transfer organizations.
+
+Apply migration `000013_organization_invitations`, then deploy the matching backend before the frontend. The migration adds invitation storage without changing existing users, organizations, or roles. The previous registration payload containing only name/email/password now returns a validation error; clients must supply either `organizationName` or `invitationToken`.
 
 ## Session and proxy rollout
 
@@ -39,16 +49,19 @@ HTTP and repository regressions use disposable PostgreSQL containers and apply t
 
 ```sh
 go test -race ./migrations -count=1 -timeout=3m
-go test -race ./internal/adapters/primary/http ./internal/adapters/secondary/postgres -run 'TestApplication|TestReview|TestAdmin|TestMePermissions|TestAssignee|TestTicketRepository|TestUserRepository|TestTicketEvent' -count=1 -timeout=4m
+go test -race ./internal/adapters/primary/http ./internal/adapters/secondary/postgres -run 'TestOnboarding|TestApplication|TestReview|TestAdmin|TestMePermissions|TestAssignee|TestTicketRepository|TestUserRepository|TestTicketEvent' -count=1 -timeout=4m
 go build ./...
 ```
 
-The regressions cover organization isolation, revoked sessions, registration rollback, concurrent administrator bootstrap, competing ticket changes, search/count parity, profile security, event pagination and ordering, and migration upgrade/rollback behavior. GitHub Actions runs the affected packages with race detection.
+The regressions cover organization isolation, organization creation, invitation expiry/revocation and concurrent acceptance, revoked sessions, registration rollback, concurrent administrator bootstrap, competing ticket changes, search/count parity, profile security, event pagination and ordering, and migration upgrade/rollback behavior. GitHub Actions runs the affected packages with race detection.
 
 For browser tests, keep the frontend and backend as sibling directories and run `npm run test:e2e` from the frontend after installing its Chromium browser. The build-tagged `test/e2e` command starts disposable PostgreSQL, migrates and seeds it, then runs the real API on `127.0.0.1:18080`. It overrides the database and JWT environment for that child process; it does not migrate the developer's database.
 
 ## Application API
 
+- `POST /auth/register` accepts `fullName`, `email`, `password`, and exactly one of `organizationName` or `invitationToken`. The server selects the organization and role. Authentication responses and `GET /me` include `organizationName`.
+- `POST /auth/invitations/preview` accepts `{ "token": "..." }` and returns the invited email, organization name, and expiry. Invalid, expired, accepted, and revoked tokens return a generic validation error.
+- `POST /admin/invitations` accepts `{ "email": "..." }` and returns `{ "invitation": {...}, "token": "..." }`. `GET /admin/invitations?limit=25&offset=0` lists only the authenticated admin's organization, using the same page envelope as users. `DELETE /admin/invitations/:id` revokes a pending invitation. Tokens are never included in lists.
 - `GET /tickets` accepts `q` (title, description, or ticket ID), `active=true` (non-closed), existing filters, and `limit`/`offset`. `GET /tickets/counts` returns all/unassigned/assigned-to-me/status/high-priority counts within the authorized scope and shared search/date filters. High priority counts active HIGH tickets.
 - `GET /admin/users` accepts `q`, `role`, `isActive`, `limit`, and `offset`. Its response contains `data`, the returned page `count`, and `pagination.hasMore`, not an invented total.
 - `GET /tickets/:id/events` keeps forward `after` pagination for polling. `direction=backward&before=<id>` retrieves older history newest first; omit `before` for the newest page. Both directions expose `hasMore` and `nextCursor`. Actor identities are resolved within the requesting organization.
@@ -61,5 +74,7 @@ Migrations 2 and 3 now have reverse scripts. Migration 4 preserves indexes owned
 Migration 11 is a no-op on the canonical BIGINT comment schema. A legacy UUID-to-BIGINT conversion discards the original UUIDs and is intentionally irreversible. Its down migration rejects that case without changing IDs. Restoring the original UUIDs requires a pre-conversion backup. A rejected migration may leave golang-migrate's version dirty; inspect the schema and migration history before manual recovery, rather than forcing the version blindly.
 
 Edits to an already-applied migration do not run again on an existing database. Back up and verify the deployed schema before choosing a rollback; the regression suite uses disposable databases only.
+
+Rolling migration 13 back removes invitation records and makes all previously issued links unusable. It preserves organizations, users, and their roles. Roll back the corresponding application versions together.
 
 After editing SQL queries or migrations, regenerate the checked-in database code with sqlc 1.30.0 using `sqlc generate`. See [ARCHITECTURE.md](ARCHITECTURE.md) for dependency and transaction boundaries.
