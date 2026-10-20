@@ -1,6 +1,6 @@
 # Service Desk Backend
 
-Go HTTP API for organization-scoped support tickets, comments, event feeds, and user administration. Requires Go 1.25 and PostgreSQL 16. Docker is required for database regression tests.
+Go HTTP API for organization-scoped support tickets, comments, event feeds, and user administration. Requires the Go version declared in `go.mod` and PostgreSQL 16. Docker is required for database regression tests.
 
 ## Local setup
 
@@ -26,6 +26,8 @@ JWTs issued before session-version support will be rejected, so affected users m
 By default, rate limiting uses the socket peer address and ignores forwarding headers. If a reverse proxy terminates connections, set `TRUSTED_PROXY_CIDRS` to a comma-separated list of that proxy's IP ranges. The proxy must append or overwrite forwarded addresses correctly. Forwarded chains are walked from the nearest hop to the first untrusted address. Do not trust every network merely to enable per-client limits.
 
 ## Validation
+
+After updating dependencies, run `go mod tidy` and include both `go.mod` and `go.sum` in the change. CI checks `go mod tidy -diff` before building. The [Go module documentation](https://go.dev/ref/mod#go-mod-tidy) explains how tidy adds missing checksums and removes unused entries. A Docker download layer cannot repair an incomplete source `go.sum` permanently because the subsequent source copy replaces it.
 
 Fast tests for the changed authentication, ticket, and client-address behavior:
 

@@ -23,7 +23,7 @@ COPY . .
 # CGO_ENABLED=0 - Static binary (no C dependencies)
 # -ldflags="-s -w" - Strip debug info and symbol tables
 # -trimpath - Remove file system paths from binary
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=readonly \
     -ldflags="-s -w -X main.Version=${APP_VERSION:-dev}" \
     -trimpath \
     -o /service-desk-app ./cmd/api

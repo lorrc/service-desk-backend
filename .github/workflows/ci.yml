@@ -12,5 +12,6 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - run: go mod tidy -diff
       - run: go build -mod=readonly ./...
       - run: go test -mod=readonly -race ./migrations ./internal/auth ./internal/core/domain ./internal/core/services ./internal/adapters/primary/http/... ./internal/adapters/secondary/postgres -timeout=4m
